@@ -42,7 +42,8 @@
       "manual_login_hint": "如果无法自动跳转，请手动打开以下链接: {url}",
       "login_success": "登录成功，令牌有效期 {expires_in} 秒",
       "tokens_saved": "令牌已保存至系统凭据管理器",
-      "load_tokens_failed": "加载令牌失败: {error}"
+      "load_tokens_failed": "加载令牌失败: {error}",
+      "no_free_port": "无法找到可用的空闲端口"
     }
   },
   "driver": {

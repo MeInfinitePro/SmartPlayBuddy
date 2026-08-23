@@ -216,7 +216,7 @@ def main():
             "status": {
                 "device": {
                     "type": "client",
-                    "deviceName": "a",
+                    "deviceName": "",
                     "deviceInfo": "",
                     "platform": platform.platform(),
                     "machine": platform.machine(),

@@ -1,7 +1,8 @@
 from .. import i18n
 from .. import log
-from ..config import SERVER_HOST, LOCAL_PORT
+from ..config import SERVER_HOST
 
+import socket
 import webbrowser
 import http.server
 import urllib.parse
@@ -66,6 +67,24 @@ def refresh_login() -> Tokens | None:
         return None
 
 
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        port = s.getsockname()[1]
+    return port
+
+
+def _is_port_available(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+
+
 def login() -> Tokens:
     result: Tokens | None = None
 
@@ -91,9 +110,13 @@ def login() -> Tokens:
         def log_message(self, format, *args):
             pass
 
-    server = http.server.HTTPServer(("127.0.0.1", LOCAL_PORT), CallbackHandler)
+    port = _find_free_port()
+    if not _is_port_available(port):
+        raise RuntimeError(i18n.translate("user.login.no_free_port"))
 
-    frontend_url = urllib.parse.quote(f"http://localhost:{LOCAL_PORT}", safe="")
+    server = http.server.HTTPServer(("127.0.0.1", port), CallbackHandler)
+
+    frontend_url = urllib.parse.quote(f"http://localhost:{port}", safe="")
     resp = urllib.request.urlopen(
         f"{SERVER_HOST}/api/user/auth/authorize?redirectUrl={frontend_url}"
     )

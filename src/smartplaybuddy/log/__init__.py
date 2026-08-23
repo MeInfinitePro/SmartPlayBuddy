@@ -19,6 +19,7 @@ logdir = "logs"
 
 name = "SmtPlay"
 level = logging.INFO
+# level = logging.DEBUG
 
 # 定位项目根目录（用于存放日志文件）
 root_path = os.path.dirname(importlib.util.find_spec(package).submodule_search_locations[0])

@@ -132,39 +132,3 @@ Event messages reported by the client (e.g., device status changes), forwarded b
 Query requests sent from the client to the server or other clients.
 
 ### system — System Message
-
-## Device Registration
-
-After connecting, the client registers device information via a `session/claim` message:
-
-```json
-{
-  "type": "session",
-  "action": "claim",
-  "data": {
-    "device": {
-      "type": "client",
-      "deviceName": "my-pc",
-      "deviceInfo": "",
-      "platform": "Windows-11-...",
-      "machine": "AMD64",
-      "appVersion": "v0.1.0",
-      "screenResolution": "1920x1080"
-    }
-  }
-}
-```
-| `type` Value | Description |
-|--------------|-------------|
-| `client` | Device side, provides local driver operations |
-| `mod` | Logic side, handles business logic |
-
-**Registration Behavior:**
-
-| Behavior | Description |
-|----------|-------------|
-| Device Identifier | Server generates full identifier: `{type}:{userId}:{deviceName}` |
-| Empty Name | Server auto-generates a UUID as `deviceName` |
-| Name Conflict | When a device with the same name is already online, the new connection is rejected and receives an error |
-| Disconnect Cleanup | Server auto-clears registration info when connection drops |
-| IP Recording | Server auto-records the client's IP in device info |
