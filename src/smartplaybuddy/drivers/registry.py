@@ -55,8 +55,17 @@ class DriverProcess:
 
         resp = self._recv()
         if not resp or resp.get("status") != "ready":
+            stderr_output = ""
+            try:
+                stderr_output = self._process.stderr.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
             self._process.kill()
-            raise RuntimeError(translate("driver.failed_to_start", name=name))
+            error_msg = translate("driver.failed_to_start", name=name)
+            if stderr_output:
+                error_msg += f"\n{stderr_output}"
+                logger.error(translate("driver.start_error", name=name, error=stderr_output))
+            raise RuntimeError(error_msg)
         self._ready = True
         logger.debug(translate("driver.started", name=name))
 
@@ -226,6 +235,9 @@ class DriverRegistry:
                     if act not in self._info:
                         self._info[act] = info
                 logger.debug(translate("driver.discovered", name=driver_name, path=entry))
+                
+                self._install_dependencies(str(entry), manifest)
+                
             except Exception as e:
                 logger.error(translate("driver.manifest_read_failed", name=entry.name, error=e))
 

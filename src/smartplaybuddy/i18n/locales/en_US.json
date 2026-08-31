@@ -51,6 +51,7 @@
     "error": "Driver error: {message}",
     "unexpected_resp": "Unexpected response: {resp}",
     "failed_to_start": "Driver '{name}' failed to start",
+    "start_error": "Driver '{name}' start error: {error}",
     "started": "Driver started: {name}",
     "stream_started": "Stream '{stream_id}' started: {name}",
     "process_exited": "Driver '{name}' process exited unexpectedly",

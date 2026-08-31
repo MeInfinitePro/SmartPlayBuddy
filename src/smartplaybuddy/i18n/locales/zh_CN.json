@@ -52,6 +52,7 @@
     "error": "驱动错误: {message}",
     "unexpected_resp": "意外响应: {resp}",
     "failed_to_start": "驱动 '{name}' 启动失败",
+    "start_error": "驱动 '{name}' 启动错误: {error}",
     "started": "驱动已启动: {name}",
     "stream_started": "流 '{stream_id}' 已启动: {name}",
     "process_exited": "驱动 '{name}' 进程意外退出",
