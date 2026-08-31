@@ -20,6 +20,19 @@ _MSG_JSON = 0
 _MSG_BINARY = 1
 
 
+def _stop_driver(driver):
+    """优雅停止驱动：先调用 driver.stop()，再立即退出进程。
+
+    使用 os._exit 跳过解释器关闭阶段——后台 daemon 读线程可能正阻塞在 stdin.read()
+    上，正常 return 会在解释器 finalizing 时因无法获取 stdin 锁而崩溃
+    （Fatal Python error: _enter_buffered_busy）。
+    """
+    try:
+        driver.stop()
+    finally:
+        os._exit(0)
+
+
 def run_driver(driver_file: str, packages_dir: str = None):
     if packages_dir:
         sys.path.insert(0, packages_dir)
@@ -93,8 +106,7 @@ def run_driver(driver_file: str, packages_dir: str = None):
                     else:
                         _send(result if isinstance(result, dict) else {"status": "ok", "result": result})
                 elif cmd == "stop":
-                    driver.stop()
-                    return
+                    _stop_driver(driver)
 
             if hasattr(driver, 'is_streaming') and driver.is_streaming() and hasattr(driver, 'capture_frames'):
                 try:
@@ -131,8 +143,7 @@ def run_driver(driver_file: str, packages_dir: str = None):
                         else:
                             _send(result if isinstance(result, dict) else {"status": "ok", "result": result})
                     elif cmd == "stop":
-                        driver.stop()
-                        return
+                        _stop_driver(driver)
                 except queue.Empty:
                     pass
     finally:

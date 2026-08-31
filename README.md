@@ -96,6 +96,25 @@ After the client starts, it will:
 - [Driver System](docs/driver.md) — Driver development guide
 - [Mod Development](docs/mods/mod-development.md) — Mod extension development guide
 
+## StarRail Plugin（崩坏：星穹铁道 自动化插件）
+
+将 [starrail_assistant](https://github.com/InfinitProgress/starrail_assistant) 的
+**每日实训任务（daily_task）** 与 **开拓力清理（physical_power）** 功能迁移为完整的
+Driver + Mod 插件，并保留原项目结构：
+
+- **Driver** — `src/smartplaybuddy/drivers/starrail/`
+  - 保留 `module/`（daily_task / physical_power / interface / common）、`utils/log/`、`assets/` 原结构
+  - 通过 `operate("starrail", {"operate": ...})` 暴露游戏内原子操作
+- **Mod** — `mods/starrail/`
+  - 逻辑端编排：`daily_task`（观察→逐项执行→领奖）、`clear_power`（查询→校验→清理）
+  - 启动：`python -m mods.starrail --target-client <deviceName>`
+- **测试** — `tests/`
+  - 单元测试（分析逻辑 / driver / mod）+ 冒烟测试（真实驱动子进程 IPC、注册表发现）
+
+```bash
+python -m pytest tests/ -v
+```
+
 ## Tech Stack
 
 | Component              | Technology                  |

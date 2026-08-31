@@ -1,3 +1,7 @@
-tests
+__pycache__/
+*.py[cod]
 logs
+packages/
+tests/.pytest_tmp/
+.pytest_cache/
 src/smartplaybuddy.egg-info

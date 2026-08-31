@@ -79,5 +79,11 @@
     "exception_in_main": "main 处理异常: {type}: {error}",
     "invalid_data_type": "无效的数据类型",
     "invalid_message_type": "无效的消息类型"
+  },
+  "mod": {
+    "starrail": {
+      "command_received": "收到星穹铁道指令: {operate} (来自 {sender})",
+      "flow_failed": "星穹铁道流程执行失败: {operate}: {error}"
+    }
   }
 }

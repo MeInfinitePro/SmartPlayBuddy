@@ -78,5 +78,11 @@
     "exception_in_main": "main handler exception: {type}: {error}",
     "invalid_data_type": "Invalid data type",
     "invalid_message_type": "Invalid message type"
+  },
+  "mod": {
+    "starrail": {
+      "command_received": "StarRail command received: {operate} (from {sender})",
+      "flow_failed": "StarRail flow failed: {operate}: {error}"
+    }
   }
 }
