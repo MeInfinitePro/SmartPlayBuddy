@@ -121,7 +121,7 @@ async function logout() {
 
 // ===== 【调试开关】跳过登录验证：true = 不校验登录直接进入应用壳 =====
 // 调试完改回 false 并重新 npm run build 即可恢复统一登录流程。
-const SKIP_AUTH = true;
+const SKIP_AUTH = false;
 
 async function boot() {
   // 【调试】登录验证已注释：直接进入应用壳（原验证逻辑保留在下方，改回 SKIP_AUTH=false 恢复）

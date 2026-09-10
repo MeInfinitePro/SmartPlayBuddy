@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+logs
+packages/
+tests/.pytest_tmp/
+.pytest_cache/
+src/smartplaybuddy.egg-info
+src/smartplaybuddy/drivers/starrail/driver_debug.log
+src/smartplaybuddy/drivers/starrail/utils/log/log.txt

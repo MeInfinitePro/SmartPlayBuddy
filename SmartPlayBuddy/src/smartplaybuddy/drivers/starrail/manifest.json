@@ -1,0 +1,10 @@
+{
+    "appid": "smartplaybuddy.driver.starrail",
+    "versionCode": "1.0.0",
+    "versionName": "v1.0.0",
+    "name": "starrail",
+    "description": "崩坏：星穹铁道 日常任务 / 开拓力自动化驱动（迁移自 starrail_assistant）",
+    "entry": "driver.py",
+    "requirements": "requirements.txt",
+    "actions": ["starrail"]
+}

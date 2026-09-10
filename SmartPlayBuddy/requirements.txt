@@ -1,0 +1,6 @@
+websockets
+pyautogui
+keyring
+pywin32
+psutil
+windows-capture

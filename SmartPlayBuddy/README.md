@@ -1,0 +1,130 @@
+# SmartPlayBuddy
+
+> 🌐 Language: **English** | [简体中文](docs/zh-CN/README.md)
+
+SmartPlayBuddy is a WebSocket-based remote device control system. With a plugin-based driver architecture, it supports local device operations such as keyboard, mouse, screen capture, and provides streaming data transmission capabilities.
+
+## Features
+
+- **Plugin-based Drivers** — Keyboard, mouse, screen capture and other drivers are loaded as plugins, supporting hot-plugging and crash isolation
+- **Streaming** — Supports high-frequency data streams such as screen capture, efficiently transmitted via the text + binary dual-frame protocol
+- **Mod Extensions** — Provides a Mod base class for third-party custom business logic
+- **Internationalization** — Built-in i18n module with multi-language hot-reload support
+- **JWT Authentication** — Server identity verification via JWT tokens
+
+## Architecture Overview
+
+```
+
+
+┌─────────────────────────────────────────────────────┐
+│                      Server                         │
+│         JWT Auth / Device Mgmt / Msg Routing        │
+└──────────────────────┬──────────────────────────────┘
+                       │ WebSocket
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+    ┌──────────┐ ┌──────────┐ ┌──────────┐
+    │  Client  │ │   Mod    │ │  Client  │
+    │ (Device) │ │  (Logic) │ │ (Device) │
+    └────┬─────┘ └──────────┘ └──────────┘
+         │
+    ┌────┴──────────────────────┐
+    │      DriverRegistry       │
+    │  ┌────────┬──────┬──────┐ │
+    │  │Keyboard│Mouse │Screen│ │
+    │  │ Driver │Driver│Driver│ │
+    │  └────┬───┴──┬───┴──┬───┘ │
+    │      │IPC   │IPC   │IPC   │
+    │ Subproc  Subproc  Subproc │
+    └───────────────────────────┘
+```
+## Project Structure
+
+```
+
+
+SmartPlayBuddy/
+├── src/smartplaybuddy/
+│   ├── client.py          ← Main client module (device side)
+│   ├── mod.py             ← Mod entry point
+│   ├── config/            ← Global config (server URL, version)
+│   ├── drivers/           ← Driver framework + plugin directory
+│   │   ├── base.py        ← BaseDriver base class
+│   │   ├── host.py        ← Subprocess driver runner
+│   │   ├── registry.py    ← Driver registry + subprocess management
+│   │   ├── keyboard/      ← Keyboard driver
+│   │   ├── mouse/         ← Mouse driver
+│   │   └── screen/        ← Screen capture driver
+│   ├── i18n/              ← Internationalization module
+│   │   ├── translator.py  ← Translator
+│   │   └── locales/       ← Language packs
+│   ├── log/               ← Logging module
+│   ├── user/              ← User authentication (JWT login)
+│   └── ws/                ← WebSocket connector
+│       ├── connector.py   ← Connection base class (text+binary dual-frame protocol)
+│       ├── message/       ← Message protocol definitions
+│       └── logic/         ← System message handling
+├── docs/                  ← Documentation
+└── pyproject.toml         ← Project configuration
+```
+## Quick Start
+
+### Requirements
+
+- Python >= 3.10
+- Windows (screen capture driver depends on DirectX)
+
+### Installation
+
+```bash
+pip install -e .
+```
+### Run Client (Device Side)
+
+```bash
+smtplay
+```
+After the client starts, it will:
+1. Auto-login or open browser for JWT authentication
+2. Scan and load local drivers
+3. Connect to the server and wait for commands
+
+## Documentation
+
+- [Data Format](docs/data-format.md) — WebSocket message protocol
+- [Driver System](docs/driver.md) — Driver development guide
+- [Mod Development](docs/mods/mod-development.md) — Mod extension development guide
+
+## StarRail Plugin（崩坏：星穹铁道 自动化插件）
+
+将 [starrail_assistant](https://github.com/InfinitProgress/starrail_assistant) 的
+**每日实训任务（daily_task）** 与 **开拓力清理（physical_power）** 功能迁移为完整的
+Driver + Mod 插件，并保留原项目结构：
+
+- **Driver** — `src/smartplaybuddy/drivers/starrail/`
+  - 保留 `module/`（daily_task / physical_power / interface / common）、`utils/log/`、`assets/` 原结构
+  - 通过 `operate("starrail", {"operate": ...})` 暴露游戏内原子操作
+- **Mod** — `mods/starrail/`
+  - 逻辑端编排：`daily_task`（观察→逐项执行→领奖，支持 task_ids 过滤）、`daily_task/observe`、`clear_power`（查询→校验→清理）
+  - 启动：`python -m mods.starrail [--target-client <deviceName>]`（缺省自动取本机主机名，同机部署免参数）
+  - 命令行调试：`python -m mods.starrail.controller --operate <op>`
+- **测试** — `tests/`
+  - 单元测试（分析逻辑 / driver / mod）+ 冒烟测试（真实驱动子进程 IPC、注册表发现）
+
+```bash
+python -m pytest tests/ -v
+```
+
+## Tech Stack
+
+| Component              | Technology                  |
+|------------------------|-----------------------------|
+| Communication Protocol | WebSocket (websockets)      |
+| Driver IPC             | stdin/stdout binary frames  |
+| Screen Capture         | dxcam + OpenCV              |
+| Keyboard/Mouse Control | pyautogui                   |
+| Authentication         | JWT (keyring token storage) |
+| Internationalization   | Custom i18n module          |
+
+> This project is currently under development, stay tuned...

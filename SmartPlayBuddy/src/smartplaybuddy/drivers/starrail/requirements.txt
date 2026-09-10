@@ -1,0 +1,9 @@
+# 崩坏：星穹铁道 驱动依赖（迁移自 starrail_assistant/dependencies）
+# 首次加载时由 DriverRegistry 自动 pip install --target packages/ 安装
+pyautogui>=0.9.54
+pywin32>=311
+psutil>=7.2.2
+pillow>=12.2.0
+opencv-python>=4.13.0.92
+numpy>=1.26.0
+rapidocr-onnxruntime>=1.2.3
