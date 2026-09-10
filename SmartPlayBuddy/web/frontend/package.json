@@ -1,0 +1,19 @@
+{
+  "name": "smartplaybuddy-starrail-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "三月七小助手 · SmartPlayBuddy Web 控制台（Vue3）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.0",
+    "vite": "^6.0.0"
+  }
+}

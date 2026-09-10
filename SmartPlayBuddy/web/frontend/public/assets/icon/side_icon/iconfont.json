@@ -1,0 +1,44 @@
+{
+  "id": "",
+  "name": "",
+  "font_family": "iconfont",
+  "css_prefix_text": "icon-",
+  "description": "",
+  "glyphs": [
+    {
+      "icon_id": "1272712",
+      "name": "主页",
+      "font_class": "home-g",
+      "unicode": "e646",
+      "unicode_decimal": 58950
+    },
+    {
+      "icon_id": "1831897",
+      "name": "启动",
+      "font_class": "start",
+      "unicode": "e66b",
+      "unicode_decimal": 58987
+    },
+    {
+      "icon_id": "2076318",
+      "name": "帮助",
+      "font_class": "bangzhu",
+      "unicode": "e8a3",
+      "unicode_decimal": 59555
+    },
+    {
+      "icon_id": "4520330",
+      "name": "日志",
+      "font_class": "rizhi",
+      "unicode": "e60c",
+      "unicode_decimal": 58892
+    },
+    {
+      "icon_id": "21036043",
+      "name": "设置",
+      "font_class": "shezhi",
+      "unicode": "e673",
+      "unicode_decimal": 58995
+    }
+  ]
+}
