@@ -35,7 +35,20 @@ logger = logging.getLogger(name)
 logger.setLevel(level)
 logger.addHandler(console_handler)
 
+class SafeTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """Windows 兼容：client 与 mod 共写同一日志文件时，跨天滚动会因
+    另一进程占用文件导致 os.rename 抛 PermissionError(WinError 32)，
+    进而触发 logging error 刷屏。这里改为：滚动失败则跳过本轮滚动，
+    继续写入原文件（日志功能不受影响，只是当天不做文件切分）。"""
+
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except PermissionError:
+            pass
+
+
 # 文件 Handler（按天轮转，保留 30 天）
-file_handler = TimedRotatingFileHandler(f"{log_path}/{name}.log", encoding="utf-8", when="D", interval=1, backupCount=30)
+file_handler = SafeTimedRotatingFileHandler(f"{log_path}/{name}.log", encoding="utf-8", when="D", interval=1, backupCount=30)
 file_handler.setFormatter(log_format)
 logger.addHandler(file_handler)

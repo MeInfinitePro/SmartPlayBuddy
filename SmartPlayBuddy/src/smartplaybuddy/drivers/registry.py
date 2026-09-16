@@ -273,7 +273,9 @@ class DriverRegistry:
 
         if not req_path.exists():
             return
-        if packages_dir.exists() and any(packages_dir.iterdir()):
+        # 移植自上游：目录非空还不够，需 requirements 中每个包都已安装才跳过，
+        # 避免上次安装中断留下"半装"状态被永久跳过。
+        if packages_dir.exists() and self._all_packages_installed(packages_dir, req_path):
             return
 
         python_exe = self._resolve_runtime_python()
@@ -293,6 +295,29 @@ class DriverRegistry:
             subprocess.check_call(cmd, timeout=120)
         except Exception as e:
             logger.error(translate("driver.install_dependencies_failed", error=e))
+
+    def _all_packages_installed(self, packages_dir: Path, req_path: Path) -> bool:
+        """逐包校验 requirements 中的包是否都已安装到 packages_dir。"""
+        if not any(packages_dir.iterdir()):
+            return False
+        try:
+            with open(req_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    pkg_name = line.split("[")[0].split(">=")[0].split("==")[0].split("<")[0].split(">")[0].strip()
+                    if not pkg_name:
+                        continue
+                    pkg_dir = packages_dir / pkg_name.replace("-", "_")
+                    dist_info_pattern = f"{pkg_name.replace('-', '_')}-*.dist-info"
+                    dist_info_pattern2 = f"{pkg_name.replace('-', '_').lower()}-*.dist-info"
+                    if not pkg_dir.exists() and not list(packages_dir.glob(dist_info_pattern)) and not list(packages_dir.glob(dist_info_pattern2)):
+                        logger.debug(translate("driver.package_not_found", package=pkg_name, path=packages_dir))
+                        return False
+            return True
+        except Exception:
+            return False
 
     def _build_cmd(self, driver_file: str, packages_dir: Optional[str]) -> list:
         if getattr(sys, 'frozen', False):

@@ -21,8 +21,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    SERVER_HOST: str = "http://smtplay.cabyss.cn:8000"
-    WS_URL: str = "ws://smtplay.cabyss.cn:2508/ws"
+    SERVER_HOST: str = "https://smtplay.cabyss.cn"
+    WS_URL: str = "wss://smtplay.cabyss.cn/ws"
     VERSION: str = "v0.0.1"
 
 

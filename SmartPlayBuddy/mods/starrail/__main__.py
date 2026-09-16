@@ -30,6 +30,7 @@ from smartplaybuddy import log
 from smartplaybuddy import user
 from smartplaybuddy.config import WS_URL
 from smartplaybuddy.device import resolve_device_name
+from smartplaybuddy.ws.connector import CLOSE_CODE_TOKEN_REVOKED
 from .mod import StarRailMod
 
 logger = log.logger.getChild("Mod").getChild("StarRail").getChild("Entry")
@@ -76,20 +77,25 @@ def main():
         RETRY_BASE = 15
         RETRY_MAX = 300
         backoff = RETRY_BASE
+        force_login = False      # 上一轮连接因 4001(token 吊销)断开时，跳过 refresh 直接重登
 
         while True:
             # 背景（2026-09-15 14:32）：平台服务器短暂 502 时，refresh_login 与
             # 回退 login 会同时抛错；若不捕获，异常会冒泡出 asyncio.run() 直接结束
             # 整个 mod 进程（表现为"莫名其妙掉线、必须人工重启"）。
             # 因此这里所有暂态故障一律退避重试，进程始终保持存活。
+            #
+            # ensure_tokens（移植自上游）：令牌仍有效则复用（重连更快），
+            # 过期则 refresh，refresh 失败或 force_login 则重新走浏览器登录。
             try:
-                tokens = user.refresh_login() or user.login()
+                tokens = await user.ensure_tokens(force_login=force_login)
             except Exception as e:
                 logger.warning("获取登录令牌失败：%s；%ds 后重试（进程保持存活）", e, backoff)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, RETRY_MAX)
                 continue
             user.save_tokens(tokens)
+            force_login = False
 
             uid = args.user_id or decode_user_id(tokens.access_token)
             if not uid:
@@ -154,6 +160,11 @@ def main():
             except Exception:
                 pass
             mod.on_close()  # 幂等：置位 _closed、清空 pending
+            # 记录断开原因：4001 = token 被吊销(他处登出)，refresh token 一并失效，
+            # 下一轮 ensure_tokens 跳过 refresh 直接重新登录。
+            force_login = (getattr(mod, "close_code", None) == CLOSE_CODE_TOKEN_REVOKED)
+            if force_login:
+                logger.warning("连接因 token 被吊销(4001)断开，下一轮将重新登录")
             await asyncio.sleep(CHECK_INTERVAL)
 
     try:

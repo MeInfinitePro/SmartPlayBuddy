@@ -23,6 +23,9 @@
     "pending_set": "Pending set: waiting for binary frame",
     "loop_exited": "Message loop exited",
     "task_create_failed": "Failed to create connection task: {error}",
+    "handshake_rejected": "Handshake rejected: status={code}, detail={error}",
+    "token_revoked": "Access token revoked (close code={code}), re-login required",
+    "claim_rejected": "Device claim rejected: {reason}; dropping connection to trigger reconnect",
     "connect_closed_error": "Connection closed: code={code}, reason={reason}",
     "binary_without_text": "Binary frame received without preceding text frame, discarded",
     "msg_parse_failed": "Message parse failed: {msg}",
@@ -42,7 +45,8 @@
       "manual_login_hint": "If not redirected automatically, please open the following link: {url}",
       "login_success": "Login successful, token expires in {expires_in} seconds",
       "tokens_saved": "Tokens saved to system credential manager",
-      "load_tokens_failed": "Failed to load tokens: {error}"
+      "load_tokens_failed": "Failed to load tokens: {error}",
+      "tokens_cleared": "Saved tokens cleared"
     }
   },
   "driver": {
@@ -62,6 +66,7 @@
     "stream_stopped": "Stream '{stream_id}' stopped: {name}",
     "installing_dependencies": "Installing dependencies for '{name}'...",
     "install_dependencies_failed": "Failed to install dependencies: {error}",
+    "package_not_found": "Dependency package not installed: {package} (in {path})",
     "no_python_runtime": "Python runtime not found, skipping dependency installation",
     "discovered": "Driver discovered: {name} ({path})",
     "duplicate_name": "Driver name '{name}' conflict: {existing} duplicates {path}",

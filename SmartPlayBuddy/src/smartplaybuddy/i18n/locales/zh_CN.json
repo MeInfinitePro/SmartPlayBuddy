@@ -23,6 +23,9 @@
     "pending_set": "已设置等待: 等待二进制帧",
     "loop_exited": "消息循环已退出",
     "task_create_failed": "创建连接任务失败: {error}",
+    "handshake_rejected": "握手被拒：状态码={code}，详情={error}",
+    "token_revoked": "access token 已被吊销(关闭码={code})，需重新登录",
+    "claim_rejected": "设备声明(claim)被拒：{reason}；主动断开以触发重连",
     "connect_closed_error": "连接关闭：代码={code}，原因={reason}",
     "binary_without_text": "收到没有前置文本帧的二进制帧，已丢弃",
     "msg_parse_failed": "消息解析失败: {msg}",
@@ -43,6 +46,7 @@
       "login_success": "登录成功，令牌有效期 {expires_in} 秒",
       "tokens_saved": "令牌已保存至系统凭据管理器",
       "load_tokens_failed": "加载令牌失败: {error}",
+      "tokens_cleared": "已清除本地保存的令牌",
       "no_free_port": "无法找到可用的空闲端口"
     }
   },
@@ -63,6 +67,7 @@
     "stream_stopped": "流 '{stream_id}' 已停止: {name}",
     "installing_dependencies": "正在为 '{name}' 安装依赖...",
     "install_dependencies_failed": "安装依赖失败: {error}",
+    "package_not_found": "依赖包未安装: {package}（位于 {path}）",
     "no_python_runtime": "未找到 Python 运行时，跳过依赖安装",
     "discovered": "发现驱动: {name} ({path})",
     "duplicate_name": "驱动名称 '{name}' 冲突: {existing} 与 {path} 重复",

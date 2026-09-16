@@ -2,6 +2,7 @@ from .. import i18n
 from .. import log
 from ..config import SERVER_HOST
 
+import asyncio
 import socket
 import webbrowser
 import http.server
@@ -11,6 +12,7 @@ import json
 import base64
 import hashlib
 import secrets
+import time
 import keyring
 from dataclasses import dataclass, asdict
 
@@ -19,6 +21,13 @@ logger = log.logger.getChild("User").getChild("Login")
 
 SERVICE_NAME = "SmartPlayBuddy"
 ACCOUNT_NAME = "UserTokens"
+
+#: access token 剩余有效期低于该值(秒)就提前刷新，避免握手中途过期
+TOKEN_REFRESH_MARGIN = 60
+
+#: 服务端 HttpOnly cookie 名（与 common/authtoken.go 的 CookieName / RefreshCookieName 一致）
+ACCESS_COOKIE_NAME = "access_token"
+REFRESH_COOKIE_NAME = "refresh_token"
 
 @dataclass
 class Tokens:
@@ -33,6 +42,64 @@ def save_tokens(tokens: Tokens):
     logger.debug(i18n.translate("user.login.tokens_saved"))
 
 
+def clear_tokens():
+    """清除本地保存的令牌（token 被吊销/强制重登时使用）。"""
+    try:
+        keyring.delete_password(SERVICE_NAME, ACCOUNT_NAME)
+        logger.debug(i18n.translate("user.login.tokens_cleared"))
+    except Exception as e:
+        logger.warning(i18n.translate("user.login.load_tokens_failed", error=str(e)))
+
+
+def decode_jwt_payload(access_token: str) -> dict:
+    """解析 JWT 的 payload 部分，返回完整 claims dict；解析失败返回空 dict。"""
+    try:
+        payload = access_token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def access_token_ttl(access_token: str) -> float | None:
+    """解析 JWT 的 exp 声明，返回 access token 剩余有效期(秒)；解析失败返回 None。"""
+    try:
+        exp = decode_jwt_payload(access_token).get("exp")
+    except Exception:
+        return None
+    if not exp:
+        return None
+    return float(exp) - time.time()
+
+
+async def ensure_tokens(tokens: Tokens | None = None, force_login: bool = False) -> Tokens:
+    """返回可用的令牌：仍然有效则复用，过期则刷新，刷新失败或 force_login 则重新登录。
+
+    异步接口（浏览器登录为阻塞 IO，经 to_thread 执行以免卡住事件循环）。
+    - force_login=True：清空本地令牌并重新走浏览器登录（用于 4001 token 被吊销）；
+    - tokens 仍有效（TTL 未知或 > TOKEN_REFRESH_MARGIN）→ 直接复用；
+    - 过期 → 尝试 refresh_login；失败 → 清空令牌后重新登录。
+    """
+    if force_login:
+        clear_tokens()
+        return await asyncio.to_thread(login)
+
+    if tokens is None:
+        tokens = _load_tokens()
+
+    if tokens is not None and tokens.access_token:
+        ttl = access_token_ttl(tokens.access_token)
+        if ttl is None or ttl > TOKEN_REFRESH_MARGIN:
+            return tokens
+
+    refreshed = refresh_login(tokens)
+    if refreshed is not None:
+        return refreshed
+
+    clear_tokens()
+    return await asyncio.to_thread(login)
+
+
 def _load_tokens() -> Tokens | None:
     try:
         credential = keyring.get_password(SERVICE_NAME, ACCOUNT_NAME)
@@ -45,8 +112,9 @@ def _load_tokens() -> Tokens | None:
         return None
 
 
-def refresh_login() -> Tokens | None:
-    tokens = _load_tokens()
+def refresh_login(tokens: Tokens | None = None) -> Tokens | None:
+    """用 refresh token 换新令牌；tokens 缺省时从系统凭据管理器加载。"""
+    tokens = tokens or _load_tokens()
     if tokens is None or not tokens.refresh_token:
         return None
     # 新契约（实测确认）：refresh token 经 Cookie 头传递（JSON body 会 401

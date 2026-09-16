@@ -223,6 +223,7 @@ def main():
     async def start():
         from . import config as app_config
         from . import user
+        from .ws.connector import CLOSE_CODE_TOKEN_REVOKED
 
         import os
         import platform
@@ -235,6 +236,8 @@ def main():
         TOKEN_TTL = 899
         RENEW_AT = TOKEN_TTL - 120
         CHECK_INTERVAL = 15
+        # 上一轮连接因 4001(token 吊销)断开时，跳过 refresh 直接重新登录
+        force_login = False
 
         from .drivers import registry
         registry.scan()
@@ -250,8 +253,16 @@ def main():
         screen = f"{pyautogui.size().width}x{pyautogui.size().height}"
 
         while True:
-            tokens = user.refresh_login() or user.login()
+            # ensure_tokens（移植自上游）：令牌仍有效则复用，过期则 refresh，
+            # 失败则重新走浏览器登录；force_login 用于 4001 token 吊销场景。
+            try:
+                tokens = await user.ensure_tokens(force_login=force_login)
+            except Exception as e:
+                logger.warning("获取登录令牌失败：%s；%ds 后重试", e, CHECK_INTERVAL)
+                await asyncio.sleep(CHECK_INTERVAL)
+                continue
             user.save_tokens(tokens)
+            force_login = False
 
             client_config = {
                 "url": WS_URL,
@@ -297,6 +308,10 @@ def main():
             except Exception:
                 pass
             client.on_close()  # 幂等：置位 _closed、停流、清空活跃流记录
+            # 4001 = token 被吊销(他处登出)，refresh token 一并失效，下一轮直接重新登录
+            force_login = (getattr(client, "close_code", None) == CLOSE_CODE_TOKEN_REVOKED)
+            if force_login:
+                logger.warning("连接因 token 被吊销(4001)断开，下一轮将重新登录")
             await asyncio.sleep(CHECK_INTERVAL)
 
     try:
