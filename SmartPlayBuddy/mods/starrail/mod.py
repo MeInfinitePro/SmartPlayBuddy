@@ -17,8 +17,8 @@ Mod 负责高层业务编排（观察任务 → 逐项执行 → 领取奖励；
     status              驱动状态 + 体力数据
     game/running        查询游戏是否已启动（透传驱动 game/running）
     game/open           启动游戏并等待进入主界面（透传驱动 game/open）
-    daily_task          完整日常流程（执行前检查游戏已启动；转发驱动 daily_task/start：
-                        观察 → 逐项执行 → 领取奖励，完成后回查剩余任务）
+    daily_task          完整日常流程（执行前检查游戏已启动；转发驱动 daily_task/start 完成
+                        观察 → 逐项执行 → 领取奖励）
     daily_task/observe  仅观察，返回未完成任务 id 列表（前端展示）
     daily_task/reward   仅领取每日实训奖励
     clear_power         清理开拓力（执行前检查游戏已启动；完成后回查体力）
@@ -168,20 +168,11 @@ async def execute_starrail_flow(operate: str, params: dict, dispatch: Callable,
     if operate == "daily_task":
         # 完整日常流程：直接委托给 starrail 驱动的 daily_task/start，
         # 由驱动侧 start_daily_task() 完成「观察 → 逐项执行 → 领取奖励」全流程。
+        # 不做完成后回查（daily_task/observe）：前端不消费该结果，省去一次全链路往返。
         await _emit("开始执行每日实训")
         started = _unwrap(await dispatch("daily_task/start", params), "daily_task/start")
         await _emit("每日实训完成")
-
-        # 完成后回查剩余任务，透传给调用方（前端可据此刷新勾选区）；回查失败不影响主结果
-        remaining = None
-        try:
-            observed = _unwrap(await dispatch("daily_task/observe", params), "daily_task/observe")
-            if isinstance(observed, dict):
-                remaining = list(observed.get("task_ids", []) or [])
-        except Exception:
-            pass
-
-        return {"status": "ok", "result": {"started": started, "remaining": remaining}}
+        return {"status": "ok", "result": {"started": started}}
 
     if operate == "daily_task/observe":
         # 仅观察，返回未完成任务列表（前端展示用）
@@ -250,6 +241,7 @@ class StarRailMod(Mod):
         self.default_timeout = float(config.get("default_timeout", 3600.0))
         self._pending: Dict[str, asyncio.Future] = {}
         self._tasks: set = set()                                   # 进行中的指令处理任务
+        self._closed = asyncio.Event()                             # 连接关闭信号（供外层重连循环等待）
         super().__init__(**config)
 
     # ---------------- 消息入口 ----------------
@@ -361,7 +353,10 @@ class StarRailMod(Mod):
 
     def on_close(self):
         for fut in self._pending.values():
-            if not fut.done():
+            if fut.done():
+                continue
+            if not fut.cancelled():
                 fut.set_result({"status": "error", "message": "连接已关闭"})
         self._pending.clear()
+        self._closed.set()
         super().on_close()

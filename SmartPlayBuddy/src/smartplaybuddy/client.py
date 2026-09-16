@@ -24,6 +24,9 @@ class Client(ws.Connector):
         self._loop = asyncio.get_event_loop()
         # 活跃流记录: {action: {from: [stream_id, ...]}}
         self._active_streams: Dict[str, Dict[str, list[str]]] = {}
+        # 续期支持：连接关闭信号 + 忙闲计数（供外层重连循环判断空闲）
+        self._closed = asyncio.Event()
+        self._busy = 0
 
     async def main(self, msg) -> None:
         try:
@@ -104,14 +107,22 @@ class Client(ws.Connector):
                 if type(msg.Data) is dict:
                     loop = asyncio.get_event_loop()
                     logger.info("收到驱动操作: action=%s", msg.Action)
-                    resp = await loop.run_in_executor(None, drivers[msg.Action], msg.Data)
+                    self._busy += 1
+                    try:
+                        resp = await loop.run_in_executor(None, drivers[msg.Action], msg.Data)
+                    finally:
+                        self._busy -= 1
                     logger.info("驱动操作完成: action=%s status=%s", msg.Action,
                                 resp.get("status") if isinstance(resp, dict) else type(resp).__name__)
                 elif type(msg.Data) is list:
                     resp = None
                     loop = asyncio.get_event_loop()
-                    for operator in msg.Data:
-                        resp = await loop.run_in_executor(None, drivers[msg.Action], operator)
+                    self._busy += 1
+                    try:
+                        for operator in msg.Data:
+                            resp = await loop.run_in_executor(None, drivers[msg.Action], operator)
+                    finally:
+                        self._busy -= 1
                 else:
                     await self.Error.error(i18n.translate("client.invalid_data_type"), To=msg.From, RequestID=msg.RequestID)
                     return
@@ -194,7 +205,7 @@ class Client(ws.Connector):
     def on_close(self):
         from .drivers import registry as drv_registry
 
-
+        self._closed.set()
         drv_registry.stop_all_streams()
         self._active_streams.clear()
         logger.info(i18n.translate("client.all_streams_stopped"))
@@ -217,8 +228,13 @@ def main():
         import platform
         import pyautogui
 
-        tokens = user.refresh_login() or user.login()
-        user.save_tokens(tokens)
+        # 外层续期循环（与 mods/starrail 同款，2026-09-14 实测）：
+        # access_token 仅 899s，过期后服务器摘除会话但不断 TCP、无任何通知
+        # （连接"假在线"，所有指令 session not found）。
+        # 故在令牌临期（提前 2 分钟）且客户端空闲（无执行中驱动操作/活跃流）时主动重建连接。
+        TOKEN_TTL = 899
+        RENEW_AT = TOKEN_TTL - 120
+        CHECK_INTERVAL = 15
 
         from .drivers import registry
         registry.scan()
@@ -231,28 +247,57 @@ def main():
         if not os.environ.get(ENV_DEVICE_NAME, "").strip():
             logger.info(i18n.translate("client.device_name_auto", name=device_name))
 
-        client_config = {
-            "url": WS_URL,
-            "headers": {
-                "Authorization": f"Bearer {tokens.access_token}",
-            },
-            "status": {
-                "device": {
-                    "type": "client",
-                    "deviceName": device_name,
-                    "deviceInfo": "",
-                    "platform": platform.platform(),
-                    "machine": platform.machine(),
-                    "appVersion": app_config.VERSION,
-                    "screenResolution": f"{pyautogui.size().width}x{pyautogui.size().height}",
-                }
-            }
-        }
-        logger.info("客户端注册: type=client deviceName=%s", device_name)
-        Client(**client_config)
+        screen = f"{pyautogui.size().width}x{pyautogui.size().height}"
 
         while True:
-            await asyncio.sleep(1)
+            tokens = user.refresh_login() or user.login()
+            user.save_tokens(tokens)
+
+            client_config = {
+                "url": WS_URL,
+                "headers": {
+                    # 新契约：WS 握手认证经 Cookie 传递（Bearer 保留兼容旧服务端）
+                    "Authorization": f"Bearer {tokens.access_token}",
+                    "Cookie": f"access_token={tokens.access_token}",
+                },
+                "status": {
+                    "device": {
+                        "type": "client",
+                        "deviceName": device_name,
+                        "deviceInfo": "",
+                        "platform": platform.platform(),
+                        "machine": platform.machine(),
+                        "appVersion": app_config.VERSION,
+                        "screenResolution": screen,
+                    }
+                }
+            }
+            logger.info("客户端注册: type=client deviceName=%s", device_name)
+            client = Client(**client_config)
+
+            # 保活观察：连接被动断开，或令牌临期且空闲时，重建连接续期
+            started = asyncio.get_event_loop().time()
+            while True:
+                await asyncio.sleep(CHECK_INTERVAL)
+                if client._closed.is_set():
+                    logger.warning("WS 连接已断开，%ds 后重连", CHECK_INTERVAL)
+                    break
+                elapsed = asyncio.get_event_loop().time() - started
+                if elapsed >= RENEW_AT:
+                    if client._busy or client._active_streams:
+                        logger.info("令牌临期但有任务执行中（busy=%d, streams=%d），延迟重建",
+                                    client._busy,
+                                    sum(len(v) for d in client._active_streams.values() for v in d.values()))
+                        continue
+                    logger.info("access_token 即将过期（%ds），空闲中主动重建连接续期", TOKEN_TTL)
+                    break
+
+            try:
+                await client.conn.close()
+            except Exception:
+                pass
+            client.on_close()  # 幂等：置位 _closed、停流、清空活跃流记录
+            await asyncio.sleep(CHECK_INTERVAL)
 
     try:
         asyncio.run(start())

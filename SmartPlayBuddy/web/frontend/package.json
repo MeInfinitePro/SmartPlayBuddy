@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "三月七小助手 · SmartPlayBuddy Web 控制台（Vue3）",
+  "description": "星穹铁道助手 · SmartPlayBuddy Web 控制台（Vue3）",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

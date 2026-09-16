@@ -56,6 +56,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue';
 import { api } from './js/api.js';
+import { isPlatformMode, uid, modName } from './js/platform.js';
 import { pushLog } from './js/log.js';
 import { settings } from './js/settings.js';
 import HomeView from './views/HomeView.vue';
@@ -124,6 +125,18 @@ async function logout() {
 const SKIP_AUTH = false;
 
 async function boot() {
+  // 平台桥接模式（智玩搭档控制台 iframe）：认证由平台负责，直接进入应用壳，
+  // 指令经 __smtplay__ 桥直达 mod 后端（见 js/platform.js）
+  if (isPlatformMode) {
+    userId.value = uid || '平台用户';
+    phase.value = 'shell';
+    pushLog('ok', `✅ 平台桥接模式已就绪（mod: ${modName}${uid ? '，用户 ' + uid : ''}）。`);
+    if (!uid) {
+      pushLog('err', '⚠️ 缺少 userId：请在控制台入口 URL 的 ?url= 后追加 &uid=<你的userId>，否则指令无法路由。');
+    }
+    return;
+  }
+
   // 【调试】登录验证已注释：直接进入应用壳（原验证逻辑保留在下方，改回 SKIP_AUTH=false 恢复）
   if (SKIP_AUTH) {
     userId.value = '本地调试';

@@ -1,0 +1,20 @@
+# SmartPlayBuddy Web 桥接服务（Linux 服务器 systemd 单元）
+# 安装：sudo cp deploy/systemd/spb-web.service /etc/systemd/system/
+#       按实际路径修改 WorkingDirectory / ExecStart 后
+#       sudo systemctl daemon-reload && sudo systemctl enable --now spb-web
+
+[Unit]
+Description=SmartPlayBuddy Web Bridge (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+# ↓ 改为实际部署路径与 Python 环境
+WorkingDirectory=/opt/SmartPlayBuddy
+EnvironmentFile=/opt/SmartPlayBuddy/deploy/.env
+ExecStart=/opt/SmartPlayBuddy/venv/bin/python web/backend/app.py --host 127.0.0.1 --port 8765
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -96,24 +96,88 @@ def token_expired(access_token: str) -> bool:
 
 
 def refresh_tokens(refresh_token: str) -> Optional[dict]:
-    """调用服务端刷新接口换取新 token（与 user/login.py 的 refresh_login 对齐）。"""
+    """调用服务端刷新接口换取新 token（与 user/login.py 的 refresh_login 对齐）。
+
+    新契约：refresh token 经 Cookie 头传递，成功后服务器轮换 refresh_token
+    （Set-Cookie 下发，必须采用新值）。
+    """
     import urllib.request
     try:
         req = urllib.request.Request(
             f"{SERVER_HOST}/api/user/auth/refresh",
-            data=json.dumps({"refreshToken": refresh_token}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Cookie": f"refresh_token={refresh_token}"},
             method="POST",
         )
         resp = urllib.request.urlopen(req, timeout=15)
         data = json.loads(resp.read())
+        cookies = _parse_set_cookies(resp)
+        access = (cookies.get("access_token") or data.get("accessToken")
+                  or data.get("access_token"))
+        if not access:
+            return None
         return {
-            "access_token": data["accessToken"],
-            "refresh_token": data.get("refreshToken", refresh_token),
-            "expires_in": data.get("expiresIn", 0),
+            "access_token": access,
+            "refresh_token": (cookies.get("refresh_token") or data.get("refreshToken")
+                              or refresh_token),
+            "expires_in": int(data.get("expiresIn") or data.get("expires_in") or 0),
         }
     except Exception:
         return None
+
+
+# ----------------------------------------------------------------------
+# PKCE handoff（服务器新契约：authorize 传 handoffChallenge，
+# 回调带 code，再用 POST /api/user/auth/token {code, verifier} 换 token）
+# ----------------------------------------------------------------------
+
+PKCE_COOKIE = "spb_pkce"
+
+
+def _generate_pkce() -> tuple[str, str]:
+    import base64
+    import hashlib
+    import secrets
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("utf-8")).digest()).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+def _parse_set_cookies(resp) -> dict:
+    """从响应头提取 Set-Cookie 键值对（新契约：token 经 Cookie 下发）。"""
+    cookies = {}
+    for header in resp.headers.get_all("Set-Cookie") or []:
+        name, _, rest = header.partition("=")
+        cookies[name.strip()] = rest.split(";", 1)[0].strip()
+    return cookies
+
+
+def _exchange_code(code: str, verifier: str) -> dict:
+    """code + verifier 换 token，返回 {"access_token","refresh_token","expires_in"}。
+
+    新契约（实测确认）：成功返回 200，body 仅 {"expiresIn": N}，
+    access_token（JWT）/refresh_token（opaque）经 Set-Cookie 下发；保留旧 body 契约兼容。
+    """
+    import urllib.request
+    req = urllib.request.Request(
+        f"{SERVER_HOST}/api/user/auth/token",
+        data=json.dumps({"code": code, "verifier": verifier}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    resp = urllib.request.urlopen(req, timeout=15)
+    data = json.loads(resp.read())
+    cookies = _parse_set_cookies(resp)
+    access = (cookies.get("access_token") or data.get("accessToken")
+              or data.get("access_token"))
+    if not access:
+        raise RuntimeError(f"token 接口未返回 accessToken: {data}")
+    return {
+        "access_token": access,
+        "refresh_token": (cookies.get("refresh_token") or data.get("refreshToken")
+                          or data.get("refresh_token") or ""),
+        "expires_in": int(data.get("expiresIn") or data.get("expires_in") or 0),
+    }
 
 
 # ======================================================================
@@ -150,18 +214,33 @@ def _resolve_iam_login_url(redirect: str) -> dict:
     服务端 /api/user/auth/authorize 返回 JSON {"url": ...}（而非重定向），
     与客户端 user/login.py 的处理方式一致：必须先解析出 url 再跳转。
     每次调用都会生成新的 nonce / PKCE 会话，因此需在登录时实时获取。
+
+    新契约：额外传 handoffChallenge（客户端 PKCE 挑战），登录成功后服务器
+    回跳 redirectUrl 时携带 code，由本服务用 verifier 调 /api/user/auth/token 换 token。
+    返回 {"ok", "loginUrl", "verifier"}，verifier 需随响应写入临时 Cookie。
     """
+    import urllib.error
     import urllib.parse
     import urllib.request
+    verifier, challenge = _generate_pkce()
     endpoint = (f"{SERVER_HOST}/api/user/auth/authorize"
-                f"?redirectUrl={urllib.parse.quote(redirect, safe='')}")
+                f"?redirectUrl={urllib.parse.quote(redirect, safe='')}"
+                f"&handoffChallenge={urllib.parse.quote(challenge, safe='')}")
     try:
         with urllib.request.urlopen(endpoint, timeout=15) as resp:
             data = json.loads(resp.read())
         url = data.get("url")
         if url:
-            return {"ok": True, "loginUrl": url}
+            return {"ok": True, "loginUrl": url, "verifier": verifier}
         return {"ok": False, "error": f"服务端未返回 url: {data}"}
+    except urllib.error.HTTPError as e:
+        # 透传服务器返回的具体原因（如 redirectUrl not in allow list）
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace").strip()
+        except Exception:
+            pass
+        return {"ok": False, "error": f"authorize 接口返回 {e.code}: {detail or e.reason}"}
     except Exception as e:
         return {"ok": False, "error": f"请求服务端 authorize 失败: {e}"}
 
@@ -182,7 +261,12 @@ async def auth_me(request: Request):
     sess = _resolve_session(request)
     if sess is None:
         resolved = _auth_login_url(request)
-        return {"authenticated": False, **resolved}
+        resp = JSONResponse({"authenticated": False, **resolved})
+        if resolved.get("verifier"):
+            # verifier 存临时 Cookie（10 分钟），回调换取 token 时读取
+            resp.set_cookie(PKCE_COOKIE, resolved["verifier"], max_age=600,
+                            httponly=True, samesite="lax")
+        return resp
     return {
         "authenticated": True,
         "userId": sess.get("user_id"),
@@ -194,27 +278,56 @@ async def auth_me(request: Request):
 @app.get("/api/auth/login-url")
 async def auth_login_url(request: Request):
     """返回统一登录跳转地址（复用已有登录验证，本服务不做登录页）。"""
-    return _auth_login_url(request)
+    resolved = _auth_login_url(request)
+    resp = JSONResponse(resolved)
+    if resolved.get("verifier"):
+        resp.set_cookie(PKCE_COOKIE, resolved["verifier"], max_age=600,
+                        httponly=True, samesite="lax")
+    return resp
 
 
 @app.get("/api/auth/callback")
-async def auth_callback(accessToken: Optional[str] = None,
+async def auth_callback(request: Request,
+                        accessToken: Optional[str] = None,
                         refreshToken: Optional[str] = None,
-                        expiresIn: int = 0):
-    """统一登录验证成功后的回跳端点（契约与客户端本地回调一致）。"""
-    if not accessToken:
+                        expiresIn: int = 0,
+                        code: Optional[str] = None):
+    """统一登录验证成功后的回跳端点。
+
+    兼容两种契约：
+    - 旧：query 直接带 accessToken/refreshToken/expiresIn；
+    - 新（PKCE handoff）：query 带 code，用临时 Cookie 里的 verifier 换取 token。
+    """
+    if code:
+        verifier = request.cookies.get(PKCE_COOKIE, "")
+        if not verifier:
+            return RedirectResponse("/?authError=missing_verifier")
+        try:
+            toks = _exchange_code(code, verifier)
+        except Exception as e:
+            print(f"[web] code 换取 token 失败: {e}", flush=True)
+            return RedirectResponse("/?authError=exchange_failed")
+        access_token = toks["access_token"]
+        refresh_token = toks["refresh_token"]
+        expires_in = toks["expires_in"]
+    elif accessToken:
+        access_token = accessToken
+        refresh_token = refreshToken or ""
+        expires_in = int(expiresIn or 0)
+    else:
         return RedirectResponse("/?authError=missing_token")
+
     sid = uuid.uuid4().hex
     SESSIONS[sid] = {
-        "access_token": accessToken,
-        "refresh_token": refreshToken or "",
-        "user_id": decode_user_id(accessToken),
-        "expires_at": time.time() + int(expiresIn or 0),
-        "target_client": SESSIONS.get(sid, {}).get("target_client"),
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user_id": decode_user_id(access_token),
+        "expires_at": time.time() + expires_in,
     }
     resp = RedirectResponse("/")
     resp.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="lax",
                     max_age=30 * 24 * 3600)
+    resp.delete_cookie(PKCE_COOKIE)
     return resp
 
 

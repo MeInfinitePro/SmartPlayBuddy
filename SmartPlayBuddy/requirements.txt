@@ -1,6 +1,13 @@
+# 开发环境依赖清单（与 pyproject.toml 的 [client] extra 对应，便于本机一键装齐）
+# 生产/服务器端只需：pip install smartplaybuddy（共享依赖自动含 pydantic-settings）
+
+# 共享依赖（client / mod / web 桥接层都需要）
 websockets
-pyautogui
 keyring
+pydantic-settings>=2.0
+
+# client 形态（Windows 本地）——对应 pyproject 的 [client] extra
+pyautogui
 pywin32
 psutil
 windows-capture

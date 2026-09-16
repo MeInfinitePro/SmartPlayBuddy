@@ -134,7 +134,9 @@ class StarRailBridge:
 
         request_id = f"web-{uuid.uuid4().hex[:12]}"
         target = f"mod:{user_id}:starrail"
-        headers = {"Authorization": f"Bearer {access_token}"}
+        # 新契约：WS 握手认证经 Cookie 传递（Bearer 保留兼容旧服务端）
+        headers = {"Authorization": f"Bearer {access_token}",
+                   "Cookie": f"access_token={access_token}"}
         status = {
             "device": {
                 "type": "mod",

@@ -36,7 +36,9 @@ def main(mod: type[Mod] = Mod):
         config = {
             "url": WS_URL,
             "headers": {
+                # 新契约：WS 握手认证经 Cookie 传递（Bearer 保留兼容旧服务端）
                 "Authorization": f"Bearer {tokens.access_token}",
+                "Cookie": f"access_token={tokens.access_token}",
             },
             "status": {
                 "device": {

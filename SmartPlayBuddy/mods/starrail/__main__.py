@@ -64,40 +64,97 @@ def main():
     args = parser.parse_args()
 
     async def start():
-        tokens = user.refresh_login() or user.login()
-        user.save_tokens(tokens)
+        # 外层重连循环：每次迭代 = 刷新令牌 → 建立连接 → 保活观察 → 断开重来。
+        # 背景（2026-09-14 挂载实测）：access_token 仅 899s，过期后服务器会摘除会话
+        # 但不断 TCP、不给任何通知（连接表现为"假在线"，指令全部 session not found）。
+        # 因此在令牌过期前（780s）主动择机重建连接续期。
+        TOKEN_TTL = 899
+        RENEW_AT = TOKEN_TTL - 120        # 提前 2 分钟重建
+        CHECK_INTERVAL = 15
 
-        uid = args.user_id or decode_user_id(tokens.access_token)
-        if not uid:
-            logger.warning("未能解析 userId，指令分发时需传入完整 target_client (client:123:pc)")
+        # 取令牌 / 建连接的失败重试退避（15s 起，最大 300s）
+        RETRY_BASE = 15
+        RETRY_MAX = 300
+        backoff = RETRY_BASE
 
-        # 目标设备解析：显式 --target-client > SMTPLAY_DEVICE_NAME > 主机名。
-        # 与 client 端注册逻辑共用 device.resolve_device_name()，保证同机部署两端自动对齐。
-        target_client = args.target_client or resolve_device_name()
-        if not args.target_client:
-            logger.info("未显式指定 --target-client，自动使用设备名 %s（请确认 client 端注册同名）", target_client)
-
-        config = {
-            "url": WS_URL,
-            "headers": {"Authorization": f"Bearer {tokens.access_token}"},
-            "status": {
-                "device": {
-                    "type": "mod",
-                    "deviceName": args.device_name,
-                    "deviceInfo": "StarRail automation mod (daily_task / physical_power)",
-                    "platform": platform.platform(),
-                    "machine": platform.machine(),
-                    "appVersion": app_config.VERSION,
-                }
-            },
-            "target_client": target_client,
-            "user_id": uid,
-            "default_timeout": args.timeout,
-        }
-        logger.info(f"StarRailMod 启动: target_client={target_client}, user_id={uid}")
-        StarRailMod(**config)
         while True:
-            await asyncio.sleep(1)
+            # 背景（2026-09-15 14:32）：平台服务器短暂 502 时，refresh_login 与
+            # 回退 login 会同时抛错；若不捕获，异常会冒泡出 asyncio.run() 直接结束
+            # 整个 mod 进程（表现为"莫名其妙掉线、必须人工重启"）。
+            # 因此这里所有暂态故障一律退避重试，进程始终保持存活。
+            try:
+                tokens = user.refresh_login() or user.login()
+            except Exception as e:
+                logger.warning("获取登录令牌失败：%s；%ds 后重试（进程保持存活）", e, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, RETRY_MAX)
+                continue
+            user.save_tokens(tokens)
+
+            uid = args.user_id or decode_user_id(tokens.access_token)
+            if not uid:
+                logger.warning("未能解析 userId，指令分发时需传入完整 target_client (client:123:pc)")
+
+            # 目标设备解析：显式 --target-client > SMTPLAY_DEVICE_NAME > 主机名。
+            # 与 client 端注册逻辑共用 device.resolve_device_name()，保证同机部署两端自动对齐。
+            target_client = args.target_client or resolve_device_name()
+            if not args.target_client:
+                logger.info("未显式指定 --target-client，自动使用设备名 %s（请确认 client 端注册同名）", target_client)
+
+            config = {
+                "url": WS_URL,
+                # 新契约：WS 握手认证经 Cookie 传递（Bearer 保留兼容旧服务端）
+                "headers": {"Authorization": f"Bearer {tokens.access_token}",
+                            "Cookie": f"access_token={tokens.access_token}"},
+                "status": {
+                    "device": {
+                        "type": "mod",
+                        "deviceName": args.device_name,
+                        "deviceInfo": "StarRail automation mod (daily_task / physical_power)",
+                        "platform": platform.platform(),
+                        "machine": platform.machine(),
+                        "appVersion": app_config.VERSION,
+                    }
+                },
+                "target_client": target_client,
+                "user_id": uid,
+                "default_timeout": args.timeout,
+            }
+            logger.info("StarRailMod 启动: deviceName=%s, target_client=%s, user_id=%s",
+                    args.device_name, target_client, uid)
+            try:
+                mod = StarRailMod(**config)
+            except Exception as e:
+                logger.warning("建立 WS 连接失败：%s；%ds 后重试", e, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, RETRY_MAX)
+                continue
+            backoff = RETRY_BASE  # 连接成功，重置退避
+
+            # 保活观察：连接被动断开，或令牌临期且当前空闲时，退出内层循环触发重连
+            started = asyncio.get_running_loop().time()
+            try:
+                while True:
+                    await asyncio.sleep(CHECK_INTERVAL)
+                    if mod._closed.is_set():
+                        logger.warning("WS 连接已断开，%ds 后重连", CHECK_INTERVAL)
+                        break
+                    elapsed = asyncio.get_running_loop().time() - started
+                    if elapsed >= RENEW_AT and not mod._tasks:
+                        logger.info("access_token 即将过期（%ds），空闲中主动重建连接续期", TOKEN_TTL)
+                        break
+                    if elapsed >= RENEW_AT:
+                        logger.info("令牌临期但有 %d 个指令执行中，延迟重建", len(mod._tasks))
+            except Exception as e:
+                # 保活期间任何异常（网络抖动等）都只触发重连，不结束进程
+                logger.warning("保活循环异常：%s；%ds 后重连", e, CHECK_INTERVAL)
+
+            try:
+                await mod.conn.close()
+            except Exception:
+                pass
+            mod.on_close()  # 幂等：置位 _closed、清空 pending
+            await asyncio.sleep(CHECK_INTERVAL)
 
     try:
         asyncio.run(start())

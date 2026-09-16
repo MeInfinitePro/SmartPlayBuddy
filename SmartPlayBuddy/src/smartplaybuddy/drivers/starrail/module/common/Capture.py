@@ -349,7 +349,8 @@ def get_starrail_main_window(save_position: bool = True, compare_position: bool 
         nonlocal main_hwnd, main_window_info
         try:
             _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-            if found_pid == target_pid and win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
+            # 允许最小化窗口入选（后续统一还原），仅要求可见
+            if found_pid == target_pid and win32gui.IsWindowVisible(hwnd):
                 title = win32gui.GetWindowText(hwnd)
                 class_name = win32gui.GetClassName(hwnd)
 
@@ -377,6 +378,28 @@ def get_starrail_main_window(save_position: bool = True, compare_position: bool 
     win32gui.EnumWindows(enum_callback, None)
 
     if main_window_info:
+        # 主窗口最小化时自动还原：截图（WGC/PrintWindow）与键鼠操作都要求非最小化，
+        # 否则整条识别链路会因"未找到游戏主窗口"而失效
+        try:
+            if win32gui.IsIconic(main_window_info['hwnd']):
+                import win32con
+                hwnd_target = main_window_info['hwnd']
+                win32gui.ShowWindow(hwnd_target, win32con.SW_RESTORE)
+                if win32gui.IsIconic(hwnd_target):
+                    # 跨进程还原在部分环境会被拒（AttachThreadInput 拒绝访问等），
+                    # SwitchToThisWindow 实测有效（还原 + 置前）
+                    ctypes.windll.user32.SwitchToThisWindow(hwnd_target, True)
+                    time.sleep(0.5)
+                if win32gui.IsIconic(hwnd_target):
+                    raise RuntimeError("还原最小化窗口失败")
+                new_rect = get_window_rect_accurate(hwnd_target)
+                main_window_info['rect'] = new_rect
+                main_window_info['width'] = new_rect[2] - new_rect[0]
+                main_window_info['height'] = new_rect[3] - new_rect[1]
+                log.info("主窗口处于最小化状态，已自动还原")
+        except Exception as e:
+            log.warning(f"还原最小化窗口失败: {e}")
+
         log.info("找到主窗口:")
         log.info(f"  标题: {main_window_info['title']}")
         log.info(f"  尺寸: {main_window_info['width']}x{main_window_info['height']}")
