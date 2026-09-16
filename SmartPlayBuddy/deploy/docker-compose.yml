@@ -4,6 +4,8 @@
 # 网络拓扑与访问限制：
 #   用户浏览器 ─▶ 80（唯一发布端口）─▶ nginx ─▶ webapi:8765（不发布端口，仅容器网内可达）
 #   webapi ─出站─▶ smtplay 服务器（统一登录 + WS 路由，必须保留 egress）
+#   ⚠ 若部署机需经代理才能访问 smtplay 服务器（fake-IP/TUN 环境），在 .env 里
+#     配 HTTPS_PROXY/HTTP_PROXY 指向宿主机代理（见 .env.example 出站代理段）。
 #   ⚠ 不要给 webapi 加 ports: 映射；⚠ 不要把网络设为 internal: true（会切断出站）。
 
 services:
@@ -27,9 +29,11 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "80:80"            # 唯一对外入口；启用 HTTPS 后改为 443 并挂载证书
+      - "80:80"            # 默认 HTTP 入口（内网/测试用）
+      # - "443:443"        # 启用 HTTPS：放开本行，并在 nginx/docker-web.conf 放开 443 段
     volumes:
       - ./nginx/docker-web.conf:/etc/nginx/conf.d/default.conf:ro
+      # - ./certs:/etc/nginx/certs:ro   # 证书目录：fullchain.pem + privkey.pem
     depends_on:
       - webapi
     networks:
