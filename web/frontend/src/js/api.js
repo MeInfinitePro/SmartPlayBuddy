@@ -40,14 +40,23 @@ const restApi = {
    * 登出：优先走新认证契约（POST /api/user/auth/logout —— 撤 JTI + 吊销
    * refresh token + 清 HttpOnly cookie，与 SmartBuddy_Web 同款服务端登出）；
    * 服务端未部署新契约（404/405）时回退旧 webapi 会话登出 /api/auth/logout。
-   * 平台桥接模式（嵌入 client）不走这里——见 platformApi.logout（本地桥清 keyring）。
+   * 探测结果按 origin 记忆（sessionStorage），后续登出直接用对的端点，
+   * 不再产生 405 网络报错噪音。平台桥接模式不走这里（见 platformApi.logout）。
    */
   logout: async () => {
+    const memKey = 'spb_logout_endpoint';
+    const remembered = sessionStorage.getItem(memKey);
+    if (remembered === 'legacy') {
+      await request('POST', '/api/auth/logout');
+      return;
+    }
     try {
       await request('POST', '/api/user/auth/logout', {});
+      sessionStorage.setItem(memKey, 'new');
     } catch (e) {
       if (e?.status !== 404 && e?.status !== 405) throw e;
       await request('POST', '/api/auth/logout');
+      sessionStorage.setItem(memKey, 'legacy');
     }
   },
 
