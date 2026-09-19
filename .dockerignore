@@ -1,0 +1,16 @@
+# 构建上下文瘦身：以下内容不进入镜像（与 .gitignore 呼应）
+.git
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+*.egg-info
+logs
+tests
+docs
+web/frontend/node_modules
+web/frontend-legacy
+web/frontend/dist
+deploy/.env
+.env
+*.log

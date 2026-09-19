@@ -23,23 +23,14 @@
     "pending_set": "已设置等待: 等待二进制帧",
     "loop_exited": "消息循环已退出",
     "task_create_failed": "创建连接任务失败: {error}",
+    "handshake_rejected": "握手被拒：状态码={code}，详情={error}",
+    "token_revoked": "access token 已被吊销(关闭码={code})，需重新登录",
+    "claim_rejected": "设备声明(claim)被拒：{reason}；主动断开以触发重连",
     "connect_closed_error": "连接关闭：代码={code}，原因={reason}",
     "binary_without_text": "收到没有前置文本帧的二进制帧，已丢弃",
     "msg_parse_failed": "消息解析失败: {msg}",
     "msg_field_missing": "消息缺少必填字段 [{field}]: {msg}",
-    "loop_exception": "消息循环异常: {error}",
-    "handshake_rejected": "握手被拒绝：HTTP {code}，{error}",
-    "connect_failed": "连接失败: {error}",
-    "error_no_target": "错误消息缺少目标(to)，仅本地记录: {data}",
-    "reconnect_in": "第 {attempt} 次重连将在 {delay}s 后开始（上次关闭码: {code}）",
-    "reconnected": "重连成功（共尝试 {attempt} 次）",
-    "reconnect_gave_up": "已达最大重试次数 {attempts}，停止重连",
-    "stopped": "已停止重连",
-    "token_revoked": "访问令牌已被吊销，需重新登录",
-    "auth_failed": "获取访问令牌失败，停止重连: {error}",
-    "claim_rejected": "设备声明被拒绝: {reason}，将断开重连重试",
-    "already_connected": "设备已连接(旧会话未过期)，保持连接并重新查询服务端 session: {reason}",
-    "session_updated": "已从服务端更新 session 信息"
+    "loop_exception": "消息循环异常: {error}"
   },
   "i18n": {
     "language_pack_not_found": "未找到语言包 {package1}，默认语言包将使用 {package2}",
@@ -49,32 +40,14 @@
   "user": {
     "login": {
       "auto_login_success": "自动登录成功，令牌有效期 {expires_in} 秒",
-      "auto_login_failed": "自动登录失败: {error}，需重新登录",
-      "opening_login": "正在打开登录窗口...",
+      "auto_login_failed": "自动登录失败: {error}，将回退到浏览器登录",
+      "opening_browser": "正在打开浏览器进行登录...",
       "manual_login_hint": "如果无法自动跳转，请手动打开以下链接: {url}",
       "login_success": "登录成功，令牌有效期 {expires_in} 秒",
       "tokens_saved": "令牌已保存至系统凭据管理器",
       "load_tokens_failed": "加载令牌失败: {error}",
-      "no_free_port": "无法找到可用的空闲端口",
-      "tokens_cleared": "本地令牌已清除",
-      "waiting": "请在登录窗口中完成登录...",
-      "timeout": "登录超时，请重试",
-      "failed": "登录失败，请关闭窗口后重试",
-      "start_failed": "启动登录失败: {error}",
-      "dialog_timeout": "登录对话框超时",
-      "cancelled_or_failed": "登录已取消或失败",
-      "login_timeout": "登录超时，请重试",
-      "process_crashed": "登录进程异常退出，请重试",
-      "login_url": "如登录窗口未自动打开，请手动访问：{url}",
-      "token_exchange_failed": "令牌兑换失败，未收到 access_token",
-      "browser_success": "登录成功！可以关闭此页面。",
-      "browser_failed": "登录失败：缺少授权码。",
-      "unknown_error": "未知登录错误",
-      "ui_mode_no_auto_login": "UI 模式：登录由 Web 应用处理，不会自动触发",
-      "force_relogin": "强制重新登录",
-      "tokens_reused": "令牌有效，复用已有登录",
-      "refreshing_tokens": "正在刷新令牌...",
-      "needs_interactive_login": "需要重新登录"
+      "tokens_cleared": "已清除本地保存的令牌",
+      "no_free_port": "无法找到可用的空闲端口"
     }
   },
   "driver": {
@@ -83,7 +56,6 @@
     "error": "驱动错误: {message}",
     "unexpected_resp": "意外响应: {resp}",
     "failed_to_start": "驱动 '{name}' 启动失败",
-    "start_error": "驱动 '{name}' 启动错误: {error}",
     "started": "驱动已启动: {name}",
     "stream_started": "流 '{stream_id}' 已启动: {name}",
     "process_exited": "驱动 '{name}' 进程意外退出",
@@ -95,13 +67,12 @@
     "stream_stopped": "流 '{stream_id}' 已停止: {name}",
     "installing_dependencies": "正在为 '{name}' 安装依赖...",
     "install_dependencies_failed": "安装依赖失败: {error}",
+    "package_not_found": "依赖包未安装: {package}（位于 {path}）",
     "no_python_runtime": "未找到 Python 运行时，跳过依赖安装",
     "discovered": "发现驱动: {name} ({path})",
     "duplicate_name": "驱动名称 '{name}' 冲突: {existing} 与 {path} 重复",
     "manifest_missing_fields": "驱动 '{name}' 的 manifest 缺少必填字段: {fields}",
-    "manifest_read_failed": "读取驱动 '{name}' 的 manifest 失败: {error}",
-    "package_not_found": "在 {path} 中未找到依赖包 '{package}'",
-    "error_fallback": "驱动错误"
+    "manifest_read_failed": "读取驱动 '{name}' 的 manifest 失败: {error}"
   },
   "client": {
     "response_sent": "响应已发送: {size} 字节 → {to}",
@@ -113,67 +84,16 @@
     "exception_in_main": "main 处理异常: {type}: {error}",
     "invalid_data_type": "无效的数据类型",
     "invalid_message_type": "无效的消息类型",
-    "token_revoked": "访问令牌已被吊销，下次启动需重新登录",
-    "log_stream_started": "已为 {to} 开启日志流 (level={level})",
-    "log_stream_stopped": "日志流已停止: stream_id={stream_id}, sender={sender}",
-    "log_unsupported_operate": "不支持的日志操作: {operate}",
-    "keepalive_send_failed": "保活 ping 发送失败(通道已断，就地停流): stream_id={stream_id}, error={error}",
-    "keepalive_tick_failed": "保活循环本轮异常: {error}",
-    "device_name_updated": "设备名已更新为服务端值: {old} → {new}"
+    "device_name_auto": "未设置 SMTPLAY_DEVICE_NAME，已自动使用主机名作为设备名: {name}（想自定义？设置该环境变量后重启客户端）"
   },
-  "logstream": {
-    "subscribed": "日志流已订阅: stream_id={stream_id}, level={level}, name={name}",
-    "unsubscribed": "日志流已退订: stream_id={stream_id}",
-    "send_failed": "日志流发送失败，自动退订: stream_id={stream_id}, error={error}"
+  "device": {
+    "non_ascii_name_ignored": "设备名 '{name}' 含非 ASCII 字符，已被忽略并回退到本机主机名（建议使用字母/数字/._-；或设置 {env} 指定 ASCII 名称）",
+    "hostname_fallback": "本机主机名 '{name}' 无法构成 ASCII 设备名，已使用兜底名 smtplay-device（建议设置 {env} 指定 ASCII 名称）"
   },
-  "bridge": {
-    "no_free_port": "无法找到可用的空闲端口用于本地桥",
-    "started": "本地 WebSocket 桥已启动: 127.0.0.1:{port}",
-    "stopped": "本地 WebSocket 桥已停止",
-    "serve_failed": "本地桥服务失败: {error}",
-    "start_failed": "启动本地桥失败: {error}",
-    "unauthorized": "本地桥握手被拒：会话 token 不匹配",
-    "bad_origin": "本地桥拒绝来源: {origin}",
-    "console_connected": "控制台已连接本地桥 (origin={origin})",
-    "console_disconnected": "控制台已断开本地桥",
-    "handler_error": "本地桥连接处理异常: {error}",
-    "binary_without_text": "收到没有前置文本帧的二进制帧，已丢弃",
-    "msg_parse_failed": "网页消息解析失败: {msg}",
-    "msg_field_missing": "网页消息缺少必填字段 [{field}]: {msg}",
-    "forward_failed": "转发到服务端失败: {error}",
-    "forward_not_connected": "客户端尚未连接服务端，消息暂无法转发，请稍后重试",
-    "relay_no_target": "服务端回执无对应网页连接，已丢弃: requestId={request_id}",
-    "relay_failed": "回执转发网页失败: {error}",
-    "orphan_stream_stop": "网页断开，停止其发起的远端流: stream_id={stream_id}, to={to}",
-    "orphan_stream_stop_failed": "停止远端流失败: {error}",
-    "missing_field": "缺少必填字段: {field}",
-    "server_not_ready": "服务未就绪"
-  },
-  "request": {
-    "title": "授权请求",
-    "incoming_request": "收到远程控制授权请求",
-    "requester": "请求方：{address}",
-    "description": "操作描述：{desc}",
-    "approve": "同意",
-    "reject": "拒绝",
-    "cli_prompt": "是否同意？(y/n): "
-  },
-  "permit": {
-    "request_approved": "授权请求已批准: request_id={request_id}",
-    "request_rejected": "授权请求已拒绝: request_id={request_id}",
-    "event_activated": "事件锁已激活: request_id={request_id}",
-    "event_released": "事件锁已释放: request_id={request_id}",
-    "unsupported_operate": "不支持的事件操作: {operate}",
-    "unauthorized_blocked": "未授权消息已拦截: type={type}, rid={rid}, from={from_addr}"
-  },
-  "ui": {
-    "login": {
-      "title": "登录",
-      "button": "登录"
-    },
-    "status": {
-      "not_connected": "未连接",
-      "connected": "已连接: {user}"
+  "mod": {
+    "starrail": {
+      "command_received": "收到星穹铁道指令: {operate} (来自 {sender})",
+      "flow_failed": "星穹铁道流程执行失败: {operate}: {error}"
     }
   }
 }

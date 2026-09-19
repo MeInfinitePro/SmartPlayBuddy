@@ -2,16 +2,23 @@
 WebSocket 连接器基类。
 处理 text + binary 双帧协议：当 text 帧标记 __binary__=true 时，
 等待紧随其后的 binary 帧完成配对，再派发到 main()。
-连接断开后由监督循环 run() 按指数退避自动重连。
+
+移植自上游 SmartBuddy 的健壮性改进（保留本仓库"外层续期循环"架构，
+不引入内层自动重连，避免与 client/mod 已有的外层循环双循环打架）：
+  - 握手被拒(InvalidStatus)识别：记录 close_code，token 过期/吊销时便于外层循环决策；
+  - CLOSE_CODE_TOKEN_REVOKED(4001)：access token 被吊销(他处登出)时外层应 force_login；
+  - claim 被拒快速断开：连接建立后 CLAIM_WINDOW 内收到"无 from 的 error"
+    即判定 claim 失败，主动断开触发外层重连（否则要等服务端 PongWait 60s）；
+  - send/send_pair 原子发送：保证 text(binary=true) 与 binary 帧成对写出。
 """
 import asyncio
-import random
 import time
 import websockets
 import json
 from abc import ABC, abstractmethod
 from .. import i18n
-from .. import logger
+from .. import log
+from ..config import WS_URL as _DEFAULT_WS_URL
 from . import logic
 from . import message
 
@@ -20,85 +27,41 @@ try:  # websockets >= 14 抛 InvalidStatus，旧版本抛 InvalidStatusCode
 except ImportError:  # pragma: no cover
     from websockets.exceptions import InvalidStatusCode as _InvalidStatus
 
-logger = logger.logger.getChild("Connector")
+logger = log.logger.getChild("Connector")
 
 # 服务端在 access token 被吊销(他处登出)时使用的关闭码，见 claimlogic.go closeCodeTokenRevoked。
-# 此时 refresh token 通常一并被吊销，只能重新走浏览器登录。
+# 此时 refresh token 通常一并被吊销，外层重连循环应走 force_login 重新走浏览器登录。
 CLOSE_CODE_TOKEN_REVOKED = 4001
+
+#: claim 生效观察窗口(秒)。窗口内收到"无 from 的 error"即判定 claim 被拒。
+CLAIM_WINDOW = 10.0
 
 
 class Connector(ABC):
     """WebSocket 连接器抽象基类，子类需实现 main() 处理业务消息。"""
-    conn: "websockets.ClientConnection | None"
+    conn: websockets.ClientConnection
 
     System: "SystemCls"
     Session: "SessionCls"
     Error: "ErrorCls"
 
-    #: 是否在每次连接前自动确保 access token 可用(过期刷新、被吊销则重新登录)。
-    #: 依赖 user 模块与系统凭据管理器；自行管理 Authorization 头时置为 False。
-    auto_auth = False
-
-    #: 重连退避参数(秒)。RECONNECT_MAX_ATTEMPTS 为 0 表示无限重试。
-    RECONNECT_BASE_DELAY = 1.0
-    RECONNECT_MAX_DELAY = 30.0
-    RECONNECT_MAX_ATTEMPTS = 0
-
-    #: claim 生效观察窗口(秒)。窗口内收到"无 from 的 error"即判定 claim 被拒。
-    CLAIM_WINDOW = 10.0
-
     def __init__(self, **config):
-        self.url = config.get("url", "ws://smtplay.cabyss.cn:2508/ws")
-        self.config = config
-        #: 当前服务端连接：connect() 成功前、以及断开退避期间均为 None。
-        #: send/send_pair 与桥转发都先查 connected，避免属性缺失抛 AttributeError。
-        self.conn: "websockets.ClientConnection | None" = None
+        self.url = config.get("url", _DEFAULT_WS_URL)
         self.close_code: int | None = None
-        self.reconnect_attempts = 0
-        self._stop_event = asyncio.Event()
         self._claim_pending = False
         self._connected_at = 0.0
-        #: 服务端权威 session 信息(由 session/status 响应填充)；每次连接重置为 None。
-        #: 本地 claim 的设备信息不完全可信，需要设备身份时一律以此为准。
-        self.session_info: dict | None = None
+        # 连接关闭信号：on_close 时置位，供外层重连/续期循环观察（client/mod 同款）
+        self._closed = asyncio.Event()
         # text(binary=true) 与其后的 binary 帧必须成对写出：
         # 服务端 ReadLoop 用 lastText* 缓存做配对，中间插入任何其他文本帧都会错配。
         self._send_lock = asyncio.Lock()
-        self._ready = asyncio.Event()
         try:
-            self.connection = asyncio.create_task(self.run())
+            self.connection = asyncio.create_task(self.connect(config))
         except Exception as e:
-            self.connection = None
             logger.error(i18n.translate("connector.task_create_failed", error=e))
 
-    @property
-    def stopped(self) -> bool:
-        """监督循环是否已被要求停止。"""
-        return self._stop_event.is_set()
-
-    @property
-    def connected(self) -> bool:
-        """服务端连接是否已建立、可用于转发。connect() 前与断开退避期间为 False。"""
-        return self.conn is not None
-
-    async def wait_ready(self, timeout: float | None = None) -> bool:
-        """等待连接建立并完成 claim，可用于发送消息。
-
-        Args:
-            timeout: 最大等待秒数。None 表示无限等待。
-
-        Returns:
-            True 表示已就绪，False 表示超时。
-        """
-        try:
-            await asyncio.wait_for(self._ready.wait(), timeout=timeout)
-            return True
-        except asyncio.TimeoutError:
-            return False
-
-    async def send(self, payload: "message.Message | bytes | str"):
-        if isinstance(payload, message.Message):
-            payload = payload.to_json()
+    async def send(self, payload: str | bytes):
+        """原子发送单帧（text 或 binary），避免与 send_pair 交叉错配。"""
         async with self._send_lock:
             await self.conn.send(payload)
 
@@ -108,108 +71,25 @@ class Connector(ABC):
             await self.conn.send(meta.to_json())
             await self.conn.send(binary)
 
-    async def close(self):
-        """主动停止：不再重连，并关闭当前连接。"""
-        self._stop_event.set()
-        await self._drop_connection()
-
-    async def _drop_connection(self):
-        conn = getattr(self, "conn", None)
-        if conn is None:
-            return
-        try:
-            await conn.close()
-        except Exception:
-            pass
-
-    async def run(self):
-        """监督循环：准备令牌 → 连接 → 断开 → 退避重连，直到 close() 或放弃。"""
-        while not self._stop_event.is_set():
-            if not await self.prepare_connection():
-                logger.error(i18n.translate("connector.stopped"))
-                break
-
-            self.close_code = None
-            await self.connect(self.config)
-            if self._stop_event.is_set():
-                break
-
-            self.reconnect_attempts += 1
-            if self.RECONNECT_MAX_ATTEMPTS and self.reconnect_attempts >= self.RECONNECT_MAX_ATTEMPTS:
-                logger.error(i18n.translate("connector.reconnect_gave_up", attempts=self.reconnect_attempts))
-                break
-
-            if not await self._wait_backoff(self.reconnect_attempts):
-                break
-        logger.debug(i18n.translate("connector.loop_exited"))
-
-    async def prepare_connection(self) -> bool:
-        """连接前准备。返回 False 表示放弃重连。"""
-        if not self.auto_auth:
-            return True
-
-        from .. import user
-        from ..user.login import ACCESS_COOKIE_NAME
-
-        revoked = self.close_code == CLOSE_CODE_TOKEN_REVOKED
-        if revoked:
-            logger.warning(i18n.translate("connector.token_revoked"))
-
-        try:
-            tokens = await user.ensure_tokens(None, revoked)
-        except Exception as e:
-            logger.error(i18n.translate("connector.auth_failed", error=e))
-            return False
-
-        if not isinstance(self.config.get("headers"), dict):
-            self.config["headers"] = {}
-        self.config["headers"]["Cookie"] = f"{ACCESS_COOKIE_NAME}={tokens.access_token}"
-        return True
-
-    def _backoff_delay(self, attempt: int) -> float:
-        delay = min(self.RECONNECT_MAX_DELAY, self.RECONNECT_BASE_DELAY * 2 ** min(attempt - 1, 16))
-        # 抖动：避免同一用户的多台设备在服务端重启后同时重连
-        return delay + random.uniform(0, delay * 0.2)
-
-    async def _wait_backoff(self, attempt: int) -> bool:
-        """等待退避时长；期间被 close() 打断返回 False。"""
-        delay = self._backoff_delay(attempt)
-        logger.warning(i18n.translate("connector.reconnect_in",
-                                      attempt=attempt, delay=f"{delay:.1f}", code=self.close_code))
-        try:
-            await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
-            return False
-        except asyncio.TimeoutError:
-            return True
-
     async def connect(self, config):
-        """建立一次连接并处理消息直到连接结束。异常不外抛，由 run() 决定是否重连。"""
-        logger.info(i18n.translate("message.connecting"))
+        logger.debug(i18n.translate("message.connecting"))
         try:
             self.conn = await websockets.connect(
                 self.url,
                 additional_headers=config.get("headers"),
                 max_size=None,
                 compression=None,
-                ping_interval=None,
-                ping_timeout=None,
             )
-            if self.reconnect_attempts:
-                logger.info(i18n.translate("connector.reconnected", attempt=self.reconnect_attempts))
-            self.reconnect_attempts = 0
             self._connected_at = time.monotonic()
-            self.session_info = None
-            logger.info(i18n.translate("message.connect_success"))
+            logger.debug(i18n.translate("message.connect_success"))
 
             self.System = self.SystemCls(self.conn)
             self.Session = self.SessionCls(self.conn)
             self.Error = self.ErrorCls(self.conn)
 
-            # 向服务端声明设备状态，随后立即查询服务端视角的权威 session。
+            # 向服务端声明设备状态
             self._claim_pending = True
             await self.Session.claims(config.get("status"))
-            await self.Session.query_status()
-            self._ready.set()
 
             await self.loop()
         except asyncio.CancelledError:
@@ -217,55 +97,33 @@ class Connector(ABC):
         except TimeoutError:
             logger.error(i18n.translate("message.connect_timeout"))
         except _InvalidStatus as e:
-            # 握手被拒：missing / invalid / revoked token，刷新令牌后重连
+            # 握手被拒：missing / invalid / revoked token。
+            # 记录状态码供外层循环判断：401→刷新令牌，4001→force_login。
             status = getattr(getattr(e, "response", None), "status_code", None)
             self.close_code = status
             logger.warning(i18n.translate("connector.handshake_rejected", code=status, error=e))
         except websockets.exceptions.ConnectionClosed as e:
             if e.rcvd is not None:
                 self.close_code = e.rcvd.code
-                if e.rcvd.code != 1000:
+                if e.rcvd.code == CLOSE_CODE_TOKEN_REVOKED:
+                    logger.warning(i18n.translate("connector.token_revoked", code=e.rcvd.code))
+                elif e.rcvd.code != 1000:
                     logger.error(i18n.translate("connector.connect_closed_error", code=e.rcvd.code, reason=e.rcvd.reason))
-            logger.info(i18n.translate("message.connect_closed"))
-        except OSError as e:
-            # 涵盖 ConnectionRefusedError / socket.gaierror / 网络不可达
-            logger.warning(i18n.translate("message.connect_server_failed"))
-            logger.debug(str(e))
+            logger.warning(i18n.translate("message.connect_closed"))
+        except ConnectionRefusedError:
+            logger.error(i18n.translate("message.connect_server_failed"))
         except Exception as e:
-            logger.error(i18n.translate("connector.connect_failed", error=e), exc_info=True)
+            logger.error(i18n.translate("connector.loop_exception", error=e), exc_info=True)
         finally:
             self._claim_pending = False
-            self._ready.clear()
             self.on_close()
-            self.conn = None
 
     def on_close(self):
-        pass
-
-    @staticmethod
-    def _is_claim_rejection(data) -> bool:
-        """判断无 from 的 error 是否为 claim 被拒。
-
-        服务端 claim 被拒只有两种返回(见 claimlogic.go)：
-          - "unknown device type: <type>"
-          - "device '<deviceName>' is already connected"
-        其余(如路由失败的 "session not found")均不属于 claim 被拒。
-        """
-        text = data if isinstance(data, str) else str(data or "")
-        return text.startswith("unknown device type:") or (
-            text.startswith("device '") and text.endswith("is already connected")
-        )
-
-    @staticmethod
-    def _is_already_connected(data) -> bool:
-        """claim 被拒是否属于"设备已连接(旧会话未过期)"——这是可自愈的正常状态，
-        不应断连重连，而应保持连接并补发 status 查询获取权威 session。"""
-        text = data if isinstance(data, str) else str(data or "")
-        return text.startswith("device '") and text.endswith("is already connected")
-
-    def _on_session_info_updated(self):
-        """服务端权威 session 信息更新后的钩子；子类可覆写以同步本地状态(如设备名)。"""
-        pass
+        # 默认：置位关闭信号，供外层重连/续期循环观察。
+        # 子类 override 时应自行置位 _closed 或调用 super().on_close()。
+        closed = getattr(self, "_closed", None)
+        if closed is not None:
+            closed.set()
 
     async def loop(self):
         """消息主循环：接收 text/binary 帧，配对后派发到 main()。"""
@@ -276,32 +134,21 @@ class Connector(ABC):
 
                 # 二进制帧：与前置 pending 的 text 帧配对
                 if isinstance(raw, bytes):
-                    # 非流帧记 DEBUG；流帧高频，降到 TRACE(不刷屏，只进日志流的 TRACE 档)
-                    if pending is None or pending.Type != "stream":
-                        logger.debug(i18n.translate("connector.binary_received", size=len(raw)))
-                    else:
-                        logger.trace(i18n.translate("connector.binary_received", size=len(raw)))
+                    logger.debug(i18n.translate("connector.binary_received", size=len(raw)))
                     if pending is not None:
                         pending.BinaryData = raw
                         msg = pending
                         pending = None
-                        if msg.Type != "stream":
-                            logger.debug(i18n.translate("connector.binary_paired", type=msg.Type, action=msg.Action))
-                        else:
-                            logger.trace(i18n.translate("connector.binary_paired", type=msg.Type, action=msg.Action))
+                        logger.debug(i18n.translate("connector.binary_paired", type=msg.Type, action=msg.Action))
                     else:
-                        logger.warning(i18n.translate("connector.binary_without_text"))
+                        logger.error(i18n.translate("connector.binary_without_text"))
                         continue
                 # 文本帧：解析 JSON 并检查是否需要等待后续二进制帧
                 else:
                     try:
                         d = json.loads(raw)
                         msg = self.Message.from_json(d)
-                        # 流帧与保活 ping/pong 高频，降到 TRACE；其余记 DEBUG
-                        if msg.Type == "stream" or (msg.Type == "system" and msg.Action in ("ping", "pong")):
-                            logger.trace(i18n.translate("connector.msg_received", msg=msg))
-                        else:
-                            logger.debug(i18n.translate("connector.msg_received", msg=msg))
+                        logger.debug(i18n.translate("connector.msg_received", msg=msg))
                     except json.decoder.JSONDecodeError:
                         logger.error(i18n.translate("connector.msg_parse_failed", msg=raw))
                         continue
@@ -325,39 +172,28 @@ class Connector(ABC):
                     # 标记 __binary__ 的消息需要等待后续二进制帧
                     if isinstance(msg.Data, dict) and msg.Data.pop("__binary__", False):
                         pending = msg
-                        if msg.Type != "stream":
-                            logger.debug(i18n.translate("connector.pending_set"))
-                        else:
-                            logger.trace(i18n.translate("connector.pending_set"))
+                        logger.debug(i18n.translate("connector.pending_set"))
                         continue
 
                 # 服务端自身产生的 error 没有 from(claim 被拒 / 未知消息类型 / 路由失败)。
                 if msg.Type == "error" and not msg.From:
-                    # 仅当错误内容命中 claim 被拒特征时才处理；
-                    # 其余无 from 的 error(如路由失败的 "session not found")不属于 claim 被拒，
-                    # 应交给 main() 按 rid 精确停对应流，绝不能误判而反复断连重连。
-                    if (self._claim_pending and self._is_claim_rejection(msg.Data)
-                            and time.monotonic() - self._connected_at <= self.CLAIM_WINDOW):
-                        self._claim_pending = False
-                        if self._is_already_connected(msg.Data):
-                            # 旧 session 未过期属正常状态：保持连接，补发 status 查询获取权威 session，
-                            # 而非断连重连(否则会陷入"重连→再次 already connected"的死循环)。
-                            logger.warning(i18n.translate("connector.already_connected", reason=msg.Data))
-                            await self.Session.query_status()
-                            continue
+                    if self._claim_pending and time.monotonic() - self._connected_at <= CLAIM_WINDOW:
                         # claim 被拒时连接依然"健康"，但本连接没有任何设备身份，
                         # 之后所有消息都会被服务端以 "device not found in connection status" 拒绝。
-                        # 必须主动断开触发重连：服务端要等 PongWait(60s) 才回收残留会话，
-                        # 退避重连几轮后即可 claim 成功。
+                        # 必须主动断开触发外层重连：服务端要等 PongWait(60s) 才回收残留会话，
+                        # 重连一轮即可 claim 成功。
+                        self._claim_pending = False
                         logger.error(i18n.translate("connector.claim_rejected", reason=msg.Data))
                         await self._drop_connection()
                         break
-                    # 其余无 from 的服务端 error 不再 continue：交给 main() 镜像给网页并记录
 
                 # 收到任何带 from 的消息说明服务端已按本设备地址完成路由，claim 必然已生效
                 if msg.From:
                     self._claim_pending = False
 
+                # 系统消息走内部逻辑，其余派发到子类
+                if msg.Type == "system":
+                    logic.system(self, msg)
                 await self.main(msg)
             except websockets.exceptions.ConnectionClosed:
                 break
@@ -366,67 +202,46 @@ class Connector(ABC):
                 break
         logger.debug(i18n.translate("connector.loop_exited"))
 
-    @staticmethod
-    def system_dispatch(func):
-        """装饰器：系统消息处理。ping/pong 就地回复，不进入业务逻辑。"""
-        async def wrapper(self, msg):
-            if msg.Type == "system":
-                from . import logic as ws_logic
-                ws_logic.system(self, msg)
-                return
-            return await func(self, msg)
-        return wrapper
-
-    @staticmethod
-    def session_dispatch(func):
-        """装饰器：session 消息处理。更新 session_info 并触发钩子，不进入业务逻辑。"""
-        async def wrapper(self, msg):
-            if msg.Type == "session" and msg.Action == "status" and isinstance(msg.Data, dict):
-                self._claim_pending = False
-                self.session_info = msg.Data
-                logger.debug(i18n.translate("connector.session_updated"))
-                self._on_session_info_updated()
-                return
-            return await func(self, msg)
-        return wrapper
+    async def _drop_connection(self):
+        conn = getattr(self, "conn", None)
+        if conn is None:
+            return
+        try:
+            await conn.close()
+        except Exception:
+            pass
 
     @abstractmethod
     async def main(self, msg: "Message") -> None:
         """子类实现：处理接收到的业务消息。"""
-        if msg.Type != "stream":
-            logger.debug(i18n.translate("connector.msg_received", msg=msg))
-        else:
-            logger.trace(i18n.translate("connector.msg_received", msg=msg))
+        logger.debug(i18n.translate("connector.msg_received", msg=msg))
 
 
     Message = message.Message
 
 
     class SystemCls:
-        def __init__(self, conn):
+        def __init__(self, conn: websockets.ClientConnection):
             self.conn = conn
 
-        async def ping(self, Data = None, To: str | None = None, RequestID: str | None = None):
-            await self.conn.send(message.system.ping(Data=Data, To=To, RequestID=RequestID))
+        async def ping(self):
+            await self.conn.send(message.system.ping())
 
 
     class SessionCls:
-        def __init__(self, conn):
+        def __init__(self, conn: websockets.ClientConnection):
             self.conn = conn
 
         async def claims(self, status: dict):
             await self.conn.send(message.session.claim(status))
 
-        async def query_status(self):
-            """查询服务端视角的本机权威 session 信息。"""
-            await self.conn.send(message.session.status())
-
 
     class ErrorCls:
-        def __init__(self, conn):
+        def __init__(self, conn: websockets.ClientConnection):
             self.conn = conn
 
         async def error(self, data, To: str | None = None, RequestID: str | None = None):
             if not To:
+                # 无 to 的消息一般由服务端自行处理，本地无处可回，静默丢弃(不再告警刷屏)
                 return
             await self.conn.send(message.error.error(data, To=To, RequestID=RequestID))

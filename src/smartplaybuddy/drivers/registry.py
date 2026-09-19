@@ -11,14 +11,15 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Dict, Optional, Callable
 
 try:
     from ..i18n import translate
-    from .. import logger
+    from .. import log
 
-    logger = logger.logger.getChild("Registry")
+    logger = log.logger.getChild("Registry")
 
     HOST_SCRIPT = Path(__file__).parent / "host.py"
 
@@ -55,19 +56,10 @@ class DriverProcess:
 
         resp = self._recv()
         if not resp or resp.get("status") != "ready":
-            stderr_output = ""
-            try:
-                stderr_output = self._process.stderr.read().decode("utf-8", errors="replace")
-            except Exception:
-                pass
             self._process.kill()
-            error_msg = translate("driver.failed_to_start", name=name)
-            if stderr_output:
-                error_msg += f"\n{stderr_output}"
-                logger.error(translate("driver.start_error", name=name, error=stderr_output))
-            raise RuntimeError(error_msg)
+            raise RuntimeError(translate("driver.failed_to_start", name=name))
         self._ready = True
-        logger.debug(translate("driver.started", name=name))
+        logger.info(translate("driver.started", name=name))
 
     def _read_exact(self, n: int) -> bytes | None:
         buf = b""
@@ -78,9 +70,9 @@ class DriverProcess:
             buf += chunk
         return buf
 
-    def _recv(self) -> dict:
+    def _recv(self, timeout: float = 60.0) -> dict:
         try:
-            return self._resp_queue.get(timeout=10)
+            return self._resp_queue.get(timeout=timeout)
         except queue.Empty:
             return None
 
@@ -121,6 +113,10 @@ class DriverProcess:
             self._process.stdin.write(header + json_bytes)
             self._process.stdin.flush()
 
+    # 驱动操作响应等待上限：游戏自动化操作（观察任务/清体力）可持续数分钟，
+    # 由上层（Mod/客户端调用方）按自身超时兜底；此处只做崩溃即时检测。
+    OPERATE_RESPONSE_TIMEOUT = 3600.0
+
     def operate(self, action: str, data: dict) -> dict:
         if self._process is None or self._process.poll() is not None:
             raise RuntimeError(translate("driver.process_exited", name=self.name))
@@ -130,7 +126,18 @@ class DriverProcess:
         with self._send_lock:
             self._process.stdin.write(header + payload)
             self._process.stdin.flush()
-        return self._recv()
+
+        # 等待响应：长超时 + 子进程崩溃即时检测（避免干等）
+        deadline = time.time() + self.OPERATE_RESPONSE_TIMEOUT
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None  # 超时（极少见），交由上层兜底
+            try:
+                return self._resp_queue.get(timeout=min(1.0, remaining))
+            except queue.Empty:
+                if self._process.poll() is not None:
+                    raise RuntimeError(translate("driver.process_exited", name=self.name))
 
     def register_stream_callback(self, stream_id: str, callback):
         self._stream_callbacks[stream_id] = callback
@@ -235,9 +242,6 @@ class DriverRegistry:
                     if act not in self._info:
                         self._info[act] = info
                 logger.debug(translate("driver.discovered", name=driver_name, path=entry))
-                
-                self._install_dependencies(str(entry), manifest)
-                
             except Exception as e:
                 logger.error(translate("driver.manifest_read_failed", name=entry.name, error=e))
 
@@ -269,13 +273,14 @@ class DriverRegistry:
 
         if not req_path.exists():
             return
+        # 移植自上游：目录非空还不够，需 requirements 中每个包都已安装才跳过，
+        # 避免上次安装中断留下"半装"状态被永久跳过。
+        if packages_dir.exists() and self._all_packages_installed(packages_dir, req_path):
+            return
 
         python_exe = self._resolve_runtime_python()
         if not python_exe:
             logger.warning(translate("driver.no_python_runtime"))
-            return
-
-        if packages_dir.exists() and self._all_packages_installed(packages_dir, req_path):
             return
 
         packages_dir.mkdir(exist_ok=True)
@@ -292,6 +297,7 @@ class DriverRegistry:
             logger.error(translate("driver.install_dependencies_failed", error=e))
 
     def _all_packages_installed(self, packages_dir: Path, req_path: Path) -> bool:
+        """逐包校验 requirements 中的包是否都已安装到 packages_dir。"""
         if not any(packages_dir.iterdir()):
             return False
         try:
@@ -317,7 +323,7 @@ class DriverRegistry:
         if getattr(sys, 'frozen', False):
             cmd = [sys.executable, "--driver-host", driver_file]
         else:
-            cmd = [sys.executable, "-m", "smartplaybuddy.drivers.host", driver_file]
+            cmd = [sys.executable, "-m", "smartplaybuddy.client", "--driver-host", driver_file]
         if packages_dir:
             cmd.append(packages_dir)
         return cmd

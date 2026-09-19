@@ -4,7 +4,7 @@ Message 数据类 + 雪花 ID 生成器。
 序列化时 Data 字段经 Base64 编码，二进制字段通过 Binary 标记。
 """
 from ...i18n import translate
-from ... import logger
+from ... import log
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,7 +14,7 @@ import time
 import threading
 
 
-logger = logger.logger.getChild("ws").getChild("message")
+logger = log.logger.getChild("ws").getChild("message")
 
 
 class SnowflakeGenerator:
@@ -125,12 +125,5 @@ class Message:
         if encoded is not None:
             d["data"] = encoded
 
-        # 高频控制帧降到 TRACE(不刷屏，只进日志流的 TRACE 档)：
-        #   - 流帧(如屏幕流 30fps)
-        #   - 保活 ping/pong(每秒每流一条)
-        # 其余非流帧记 DEBUG。
-        if self.Type == "stream" or (self.Type == "system" and self.Action in ("ping", "pong")):
-            logger.trace(translate("message.serialized", msg=str(d)))
-        else:
-            logger.debug(translate("message.serialized", msg=str(d)))
+        logger.debug(translate("message.serialized", msg=str(d)))
         return json.dumps(d)

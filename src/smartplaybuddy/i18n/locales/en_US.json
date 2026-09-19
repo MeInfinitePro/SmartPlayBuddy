@@ -23,23 +23,14 @@
     "pending_set": "Pending set: waiting for binary frame",
     "loop_exited": "Message loop exited",
     "task_create_failed": "Failed to create connection task: {error}",
+    "handshake_rejected": "Handshake rejected: status={code}, detail={error}",
+    "token_revoked": "Access token revoked (close code={code}), re-login required",
+    "claim_rejected": "Device claim rejected: {reason}; dropping connection to trigger reconnect",
     "connect_closed_error": "Connection closed: code={code}, reason={reason}",
     "binary_without_text": "Binary frame received without preceding text frame, discarded",
     "msg_parse_failed": "Message parse failed: {msg}",
     "msg_field_missing": "Message missing required field [{field}]: {msg}",
-    "loop_exception": "Message loop exception: {error}",
-    "handshake_rejected": "Handshake rejected: HTTP {code}, {error}",
-    "connect_failed": "Connection failed: {error}",
-    "error_no_target": "Error message has no target (to), logged locally: {data}",
-    "reconnect_in": "Reconnecting in {delay}s (attempt {attempt}, last close code: {code})",
-    "reconnected": "Reconnected after {attempt} attempt(s)",
-    "reconnect_gave_up": "Max reconnect attempts ({attempts}) reached, giving up",
-    "stopped": "Reconnection stopped",
-    "token_revoked": "Access token revoked, re-login required",
-    "auth_failed": "Failed to obtain access token, reconnection stopped: {error}",
-    "claim_rejected": "Device claim rejected: {reason}, reconnecting to retry",
-    "already_connected": "Device already connected (stale session not expired); keeping connection and re-querying server session: {reason}",
-    "session_updated": "Authoritative session info updated from server"
+    "loop_exception": "Message loop exception: {error}"
   },
   "i18n": {
     "language_pack_not_found": "Language pack {package1} not found, falling back to {package2}",
@@ -49,32 +40,13 @@
   "user": {
     "login": {
       "auto_login_success": "Auto login successful, token expires in {expires_in} seconds",
-      "auto_login_failed": "Auto login failed: {error}, re-login required",
-      "opening_login": "Opening login window...",
+      "auto_login_failed": "Auto login failed: {error}, falling back to browser login",
+      "opening_browser": "Opening browser for login...",
       "manual_login_hint": "If not redirected automatically, please open the following link: {url}",
       "login_success": "Login successful, token expires in {expires_in} seconds",
       "tokens_saved": "Tokens saved to system credential manager",
       "load_tokens_failed": "Failed to load tokens: {error}",
-      "no_free_port": "No free port available",
-      "tokens_cleared": "Local tokens cleared",
-      "waiting": "Please complete login in the login window...",
-      "timeout": "Login timed out, please retry",
-      "failed": "Login failed, please close the window and retry",
-      "start_failed": "Failed to start login: {error}",
-      "dialog_timeout": "Login dialog timed out",
-      "cancelled_or_failed": "Login cancelled or failed",
-      "login_timeout": "Login timed out, please try again",
-      "process_crashed": "Login process crashed, please try again",
-      "login_url": "If the login window doesn't open automatically, please visit: {url}",
-      "token_exchange_failed": "Token exchange failed: no access_token received",
-      "browser_success": "Login successful! You can close this page.",
-      "browser_failed": "Login failed: missing authorization code.",
-      "unknown_error": "Unknown login error",
-      "ui_mode_no_auto_login": "UI mode: login is handled by the web app, not auto-triggered",
-      "force_relogin": "Forced re-login",
-      "tokens_reused": "Tokens valid, reusing existing login",
-      "refreshing_tokens": "Refreshing tokens...",
-      "needs_interactive_login": "Interactive login required"
+      "tokens_cleared": "Saved tokens cleared"
     }
   },
   "driver": {
@@ -83,7 +55,6 @@
     "error": "Driver error: {message}",
     "unexpected_resp": "Unexpected response: {resp}",
     "failed_to_start": "Driver '{name}' failed to start",
-    "start_error": "Driver '{name}' start error: {error}",
     "started": "Driver started: {name}",
     "stream_started": "Stream '{stream_id}' started: {name}",
     "process_exited": "Driver '{name}' process exited unexpectedly",
@@ -95,13 +66,12 @@
     "stream_stopped": "Stream '{stream_id}' stopped: {name}",
     "installing_dependencies": "Installing dependencies for '{name}'...",
     "install_dependencies_failed": "Failed to install dependencies: {error}",
+    "package_not_found": "Dependency package not installed: {package} (in {path})",
     "no_python_runtime": "Python runtime not found, skipping dependency installation",
     "discovered": "Driver discovered: {name} ({path})",
     "duplicate_name": "Driver name '{name}' conflict: {existing} duplicates {path}",
     "manifest_missing_fields": "Driver '{name}' manifest missing required fields: {fields}",
-    "manifest_read_failed": "Failed to read driver '{name}' manifest: {error}",
-    "package_not_found": "Package '{package}' not found in {path}",
-    "error_fallback": "Driver error"
+    "manifest_read_failed": "Failed to read driver '{name}' manifest: {error}"
   },
   "client": {
     "response_sent": "Response sent: {size} bytes → {to}",
@@ -113,67 +83,16 @@
     "exception_in_main": "main handler exception: {type}: {error}",
     "invalid_data_type": "Invalid data type",
     "invalid_message_type": "Invalid message type",
-    "token_revoked": "Access token revoked, please log in again on next start",
-    "log_stream_started": "Log stream started for {to} (level={level})",
-    "log_stream_stopped": "Log stream stopped: stream_id={stream_id}, sender={sender}",
-    "log_unsupported_operate": "Unsupported log operate: {operate}",
-    "keepalive_send_failed": "Keepalive ping send failed (channel down, stopping stream): stream_id={stream_id}, error={error}",
-    "keepalive_tick_failed": "Keepalive loop tick failed: {error}",
-    "device_name_updated": "Device name updated to server-authoritative value: {old} → {new}"
+    "device_name_auto": "SMTPLAY_DEVICE_NAME not set; using hostname as device name: {name} (set the env var to customize)"
   },
-  "logstream": {
-    "subscribed": "Log stream subscribed: stream_id={stream_id}, level={level}, name={name}",
-    "unsubscribed": "Log stream unsubscribed: stream_id={stream_id}",
-    "send_failed": "Log stream send failed, unsubscribing: stream_id={stream_id}, error={error}"
+  "device": {
+    "non_ascii_name_ignored": "Device name '{name}' contains non-ASCII characters; ignored, falling back to local hostname (use letters/digits/._-; or set {env} to an ASCII name)",
+    "hostname_fallback": "Hostname '{name}' cannot form an ASCII device name; using fallback smtplay-device (set {env} to an ASCII name)"
   },
-  "bridge": {
-    "no_free_port": "No free port available for the local bridge",
-    "started": "Local WebSocket bridge started at 127.0.0.1:{port}",
-    "stopped": "Local WebSocket bridge stopped",
-    "serve_failed": "Local bridge serve failed: {error}",
-    "start_failed": "Failed to start local bridge: {error}",
-    "unauthorized": "Local bridge handshake rejected: session token mismatch",
-    "bad_origin": "Local bridge rejected origin: {origin}",
-    "console_connected": "Console connected to local bridge (origin={origin})",
-    "console_disconnected": "Console disconnected from local bridge",
-    "handler_error": "Local bridge connection handler error: {error}",
-    "binary_without_text": "Binary frame received without preceding text frame, discarded",
-    "msg_parse_failed": "Web message parse failed: {msg}",
-    "msg_field_missing": "Web message missing required field [{field}]: {msg}",
-    "forward_failed": "Failed to forward to server: {error}",
-    "forward_not_connected": "Client not yet connected to server; message cannot be forwarded, please retry later",
-    "relay_no_target": "No matching web connection for server reply, discarded: requestId={request_id}",
-    "relay_failed": "Failed to relay reply to web: {error}",
-    "orphan_stream_stop": "Web disconnected, stopping its remote stream: stream_id={stream_id}, to={to}",
-    "orphan_stream_stop_failed": "Failed to stop remote stream: {error}",
-    "missing_field": "Missing required field: {field}",
-    "server_not_ready": "Server not ready"
-  },
-  "request": {
-    "title": "Authorization Request",
-    "incoming_request": "Incoming remote control authorization request",
-    "requester": "Requester: {address}",
-    "description": "Description: {desc}",
-    "approve": "Approve",
-    "reject": "Reject",
-    "cli_prompt": "Do you approve? (y/n): "
-  },
-  "permit": {
-    "request_approved": "Authorization request approved: request_id={request_id}",
-    "request_rejected": "Authorization request rejected: request_id={request_id}",
-    "event_activated": "Event lock activated: request_id={request_id}",
-    "event_released": "Event lock released: request_id={request_id}",
-    "unsupported_operate": "Unsupported event operate: {operate}",
-    "unauthorized_blocked": "Unauthorized message blocked: type={type}, rid={rid}, from={from_addr}"
-  },
-  "ui": {
-    "login": {
-      "title": "Login",
-      "button": "Login"
-    },
-    "status": {
-      "not_connected": "Not connected",
-      "connected": "Connected: {user}"
+  "mod": {
+    "starrail": {
+      "command_received": "StarRail command received: {operate} (from {sender})",
+      "flow_failed": "StarRail flow failed: {operate}: {error}"
     }
   }
 }

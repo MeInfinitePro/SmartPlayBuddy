@@ -1,0 +1,51 @@
+# SmartPlayBuddy Web 端容器编排
+# 用法：cd deploy && cp .env.example .env && 编辑 .env && docker compose up -d
+#
+# 网络拓扑与访问限制：
+#   用户浏览器 ─▶ 80（唯一发布端口）─▶ nginx ─▶ webapi:8765（不发布端口，仅容器网内可达）
+#   webapi ─出站─▶ smtplay 服务器（统一登录 + WS 路由，必须保留 egress）
+#   ⚠ 若部署机需经代理才能访问 smtplay 服务器（fake-IP/TUN 环境），在 .env 里
+#     配 HTTPS_PROXY/HTTP_PROXY 指向宿主机代理（见 .env.example 出站代理段）。
+#   ⚠ 不要给 webapi 加 ports: 映射；⚠ 不要把网络设为 internal: true（会切断出站）。
+
+services:
+  webapi:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: smartplaybuddy-webapi:latest
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - spb-internal
+    # 故意没有 ports: —— webapi 不直接暴露给宿主机网络
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8765/api/auth/me', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"            # 默认 HTTP 入口（内网/测试用）
+      # - "443:443"        # 启用 HTTPS：放开本行，并在 nginx/docker-web.conf 放开 443 段
+    volumes:
+      - ./nginx/docker-web.conf:/etc/nginx/conf.d/default.conf:ro
+      # - ./certs:/etc/nginx/certs:ro   # 证书目录：fullchain.pem + privkey.pem
+    depends_on:
+      - webapi
+    networks:
+      - spb-internal
+
+  # 可选：SESSIONS 会话外置（webapi 支持后启用，多实例/重启不掉线）
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   networks:
+  #     - spb-internal
+
+networks:
+  spb-internal:
+    driver: bridge         # 普通 bridge：保留出站（webapi 需连统一登录/游戏服务器）

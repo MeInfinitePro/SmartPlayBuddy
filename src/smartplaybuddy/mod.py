@@ -4,144 +4,99 @@ Mod 开发入口模块。
 """
 from . import ws
 from . import i18n
-from . import logger
-from .config import Config
-from .ws import message
+from . import log
+from .config import WS_URL
+
 import asyncio
 
-
-logger = logger.logger.getChild("Mod")
-
-
-class _PermitEvent:
-    """授权事件：封装 request → event lock → 操作 → release 的完整流程。"""
-
-    def __init__(self, mod: "Mod", target: str, description: str):
-        self._mod = mod
-        self._target = target
-        self._description = description
-        self._rid: str | None = None
-
-    async def __aenter__(self) -> str:
-        loop = asyncio.get_event_loop()
-        self._mod._permit_future = loop.create_future()
-
-        msg = message.Message(
-            Type="request",
-            Action="permit",
-            To=self._target,
-            Data={
-                "operate": "request_permit",
-                "description": self._description,
-            },
-        )
-        await self._mod.send(msg)
-        self._rid = msg.RequestID
-
-        try:
-            status = await asyncio.wait_for(self._mod._permit_future, timeout=120)
-        except asyncio.TimeoutError:
-            self._mod._permit_future = None
-            raise TimeoutError("授权请求超时")
-
-        self._mod._permit_future = None
-
-        if status != "approved":
-            raise PermissionError(f"授权被拒绝: {status}")
-
-        await self._mod.send(message.Message(
-            Type="event",
-            Action="permit",
-            To=self._target,
-            RequestID=self._rid,
-            Data={"operate": "activate"},
-        ))
-
-        return self._rid
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self._rid:
-            await self._mod.send(message.Message(
-                Type="event",
-                Action="permit",
-                To=self._target,
-                RequestID=self._rid,
-                Data={"operate": "release"},
-            ))
-        return False
-
+logger = log.logger.getChild("Mod")
 
 class Mod(ws.Connector):
     """Mod 基类，开发者继承并实现 main() 方法处理消息。"""
 
-    auto_auth = True
-
     def __init__(self, **config):
         super().__init__(**config)
-        self._permit_future: asyncio.Future | None = None
-
-    @staticmethod
-    def permit_dispatch(func):
-        """装饰器：permit response 拦截。resolve _permit_future，不进入业务逻辑。"""
-        async def wrapper(self, msg):
-            if (msg.Type == "response" and msg.Action == "permit"
-                    and self._permit_future
-                    and not self._permit_future.done()):
-                status = (msg.Data or {}).get("status", "rejected") if isinstance(msg.Data, dict) else "rejected"
-                self._permit_future.set_result(status)
-                return
-            return await func(self, msg)
-        return wrapper
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        if "main" in cls.__dict__:
-            cls.main = cls.permit_dispatch(cls.system_dispatch(cls.session_dispatch(cls.__dict__["main"])))
 
     async def main(self, msg) -> None:
         print(msg)
 
-    def permit(self, target: str, description: str = "") -> "_PermitEvent":
-        """授权上下文管理器。用法：
-
-            async with self.permit(target, "屏幕捕获") as rid:
-                await self.send(self.Message(
-                    Type="command", Action="screen", To=target, RequestID=rid,
-                    Data={"operate": "capture", "format": "jpeg"},
-                ))
-        """
-        return _PermitEvent(self, target, description)
 
 def main(mod: type[Mod] = Mod):
     """Mod 启动入口。"""
     async def start():
+        from . import config
         from . import user
+        from .device import resolve_device_name
+        from .ws.connector import CLOSE_CODE_TOKEN_REVOKED
 
         import platform
 
-        await user.ensure_tokens()
+        # 外层循环：令牌临期/连接断开时重建连接（与 client.py、mods/starrail 同款）。
+        # ensure_tokens（移植自上游）：令牌仍有效则复用，过期则 refresh，
+        # 失败则重新走浏览器登录；force_login 用于 4001 token 吊销场景。
+        TOKEN_TTL = 899
+        RENEW_AT = TOKEN_TTL - 120
+        CHECK_INTERVAL = 15
+        force_login = False
 
-        mod_config = {
-            "url": Config.ws_url,
-            "status": {
-                "device": {
-                    "type": "mod",
-                    "deviceName": Config.device_name,
-                    "deviceInfo": "",
-                    "platform": platform.platform(),
-                    "machine": platform.machine(),
-                    "appVersion": Config.version,
+        # 设备名解析：显式环境变量 SMTPLAY_DEVICE_NAME > 本机主机名兜底。
+        # 空串会被服务端分配随机 UUID，外部无法按名定位。
+        device_name = resolve_device_name()
+        logger.info(i18n.translate("client.device_name_auto", name=device_name))
+
+        while True:
+            try:
+                tokens = await user.ensure_tokens(force_login=force_login)
+            except Exception as e:
+                logger.warning("获取登录令牌失败：%s；%ds 后重试", e, CHECK_INTERVAL)
+                await asyncio.sleep(CHECK_INTERVAL)
+                continue
+            user.save_tokens(tokens)
+            force_login = False
+
+            mod_config = {
+                "url": WS_URL,
+                "headers": {
+                    # 新契约：WS 握手认证经 Cookie 传递（Bearer 保留兼容旧服务端）
+                    "Authorization": f"Bearer {tokens.access_token}",
+                    "Cookie": f"{user.ACCESS_COOKIE_NAME}={tokens.access_token}",
+                },
+                "status": {
+                    "device": {
+                        "type": "mod",
+                        "deviceName": device_name,
+                        "deviceInfo": "",
+                        "platform": platform.platform(),
+                        "machine": platform.machine(),
+                        "appVersion": config.VERSION,
+                    }
                 }
             }
-        }
-        client = mod(**mod_config)
+            m = mod(**mod_config)
 
-        try:
-            await client.connection
-        finally:
-            await client.close()
+            started = asyncio.get_event_loop().time()
+            while True:
+                await asyncio.sleep(CHECK_INTERVAL)
+                if m._closed.is_set():
+                    logger.warning("WS 连接已断开，%ds 后重连", CHECK_INTERVAL)
+                    break
+                elapsed = asyncio.get_event_loop().time() - started
+                if elapsed >= RENEW_AT:
+                    logger.info("access_token 即将过期（%ds），主动重建连接续期", TOKEN_TTL)
+                    break
+
+            try:
+                await m.conn.close()
+            except Exception:
+                pass
+            m.on_close()
+            # 4001 = token 被吊销(他处登出)，下一轮直接重新登录
+            force_login = (getattr(m, "close_code", None) == CLOSE_CODE_TOKEN_REVOKED)
+            if force_login:
+                logger.warning("连接因 token 被吊销(4001)断开，下一轮将重新登录")
+            await asyncio.sleep(CHECK_INTERVAL)
 
     try:
         asyncio.run(start())
-    except KeyboardInterrupt:
-        logger.debug(i18n.translate("system.close"))
+    except:
+        logger.info(i18n.translate("system.close"))

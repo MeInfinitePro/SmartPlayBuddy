@@ -48,7 +48,7 @@ SmartPlayBuddy/
 ├── src/smartplaybuddy/
 │   ├── client.py          ← Main client module (device side)
 │   ├── mod.py             ← Mod entry point
-│   ├── config.py          ← Global config (server URL, version)
+│   ├── config/            ← Global config (server URL, version)
 │   ├── drivers/           ← Driver framework + plugin directory
 │   │   ├── base.py        ← BaseDriver base class
 │   │   ├── host.py        ← Subprocess driver runner
@@ -59,7 +59,7 @@ SmartPlayBuddy/
 │   ├── i18n/              ← Internationalization module
 │   │   ├── translator.py  ← Translator
 │   │   └── locales/       ← Language packs
-│   ├── logger.py          ← Logging module
+│   ├── log/               ← Logging module
 │   ├── user/              ← User authentication (JWT login)
 │   └── ws/                ← WebSocket connector
 │       ├── connector.py   ← Connection base class (text+binary dual-frame protocol)
@@ -92,9 +92,29 @@ After the client starts, it will:
 
 ## Documentation
 
-- [DataFormat](docs/DataFormat.md) — WebSocket message protocol
-- [DriverSystem](docs/Driver.md) — Driver development guide
-- [ModDevelopment](docs/mods/ModDevelopment.md) — Mod extension development guide
+- [Data Format](docs/data-format.md) — WebSocket message protocol
+- [Driver System](docs/driver.md) — Driver development guide
+- [Mod Development](docs/mods/mod-development.md) — Mod extension development guide
+
+## StarRail Plugin（崩坏：星穹铁道 自动化插件）
+
+将 [starrail_assistant](https://github.com/InfinitProgress/starrail_assistant) 的
+**每日实训任务（daily_task）** 与 **开拓力清理（physical_power）** 功能迁移为完整的
+Driver + Mod 插件，并保留原项目结构：
+
+- **Driver** — `src/smartplaybuddy/drivers/starrail/`
+  - 保留 `module/`（daily_task / physical_power / interface / common）、`utils/log/`、`assets/` 原结构
+  - 通过 `operate("starrail", {"operate": ...})` 暴露游戏内原子操作
+- **Mod** — `mods/starrail/`
+  - 逻辑端编排：`daily_task`（观察→逐项执行→领奖，支持 task_ids 过滤）、`daily_task/observe`、`clear_power`（查询→校验→清理）
+  - 启动：`python -m mods.starrail [--target-client <deviceName>]`（缺省自动取本机主机名，同机部署免参数）
+  - 命令行调试：`python -m mods.starrail.controller --operate <op>`
+- **测试** — `tests/`
+  - 单元测试（分析逻辑 / driver / mod）+ 冒烟测试（真实驱动子进程 IPC、注册表发现）
+
+```bash
+python -m pytest tests/ -v
+```
 
 ## Tech Stack
 

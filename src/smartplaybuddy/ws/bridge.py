@@ -252,6 +252,32 @@ class LocalBridge:
                 except (json.JSONDecodeError, ValueError):
                     pass
 
+    @staticmethod
+    def _user_public_info() -> dict:
+        """从登录令牌解析出的 Config.user 提取可展示给前端的基本信息（白名单字段）。"""
+        user = getattr(Config, "user", None) or {}
+        keys = ("uid", "name", "nickname", "username", "preferred_username")
+        return {k: user[k] for k in keys if user.get(k)}
+
+    async def _reply_whoami(self, msg: Message, reply: "_WebReply"):
+        """应答前端身份查询：返回本机登录账号信息（uid 为主键，缺失说明 client 未登录）。"""
+        out = Message(Type="system", Action="whoami", To=msg.From,
+                      RequestID=msg.RequestID, Data=self._user_public_info())
+        await reply.send_json(out)
+
+    @staticmethod
+    def _frontend_logout():
+        """前端发起的退出登录：清空本机令牌并让主窗口回到统一登录态。"""
+        from ..user.login import clear_tokens
+        try:
+            clear_tokens()
+            from .. import ui
+            window = getattr(ui, "window", None)
+            if window is not None:
+                window.request_logout()
+        except Exception as e:
+            logger.error(f"frontend logout failed: {e}", exc_info=True)
+
     def _client_address_prefix(self) -> str:
         """本机 client 在服务端的地址前缀：client:{uid}:{clientDeviceName}。
         也是 mod 扩展地址 client:{uid}:{clientDeviceName}:{mod} 的前三段。
@@ -281,9 +307,18 @@ class LocalBridge:
     async def _dispatch(self, msg: Message, reply: _WebReply):
         local = self._is_local_target(msg.To)
 
-        # 本机网页的 system/* 消息全部交给全局 logic.system 处理（ping→pong、pong→延迟统计等），
-        # 通过 _WebPongSender 把回复重定向回 web（而非服务端）。
+        # 本机网页的 system/* 消息：whoami/logout 由桥就地处理（身份查询与退出登录），
+        # 其余(ping/pong 等)交给全局 logic.system 处理，回复经 _WebPongSender 重定向回 web。
         if local and msg.Type == "system":
+            if msg.Action == "whoami":
+                await self._reply_whoami(msg, reply)
+                return
+            if msg.Action == "logout":
+                ack = Message(Type="system", Action="logout", To=msg.From,
+                              RequestID=msg.RequestID, Data={"ok": True})
+                await reply.send_json(ack)
+                asyncio.create_task(self._frontend_logout())
+                return
             logic.system(_WebPongSender(reply), msg)
             return
 

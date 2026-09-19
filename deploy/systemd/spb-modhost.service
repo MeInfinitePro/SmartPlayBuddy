@@ -1,0 +1,20 @@
+# SmartPlayBuddy Mod 常驻进程（服务器端运行 mods/starrail 编排逻辑）
+# Mod 与 WebAPI 同属服务器端；独立进程使 Mod 崩溃不连坐 Web 服务。
+# 注意：Mod 指令最终路由到各用户 Client 的驱动执行，本进程只做编排，不需要 Windows。
+
+[Unit]
+Description=SmartPlayBuddy StarRail Mod Host
+After=network.target
+
+[Service]
+Type=simple
+# ↓ 改为实际部署路径与 Python 环境
+WorkingDirectory=/opt/SmartPlayBuddy
+EnvironmentFile=/opt/SmartPlayBuddy/deploy/.env
+# target-client 可缺省（自动取主机名）；多设备环境显式指定
+ExecStart=/opt/SmartPlayBuddy/venv/bin/python -m mods.starrail
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

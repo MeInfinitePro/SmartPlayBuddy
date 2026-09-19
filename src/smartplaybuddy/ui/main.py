@@ -6,6 +6,7 @@ keyring 为唯一令牌源，cookie 仅作为传输层。
 """
 import time
 import asyncio
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from PyQt6.QtWidgets import QMainWindow
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineScript
@@ -54,8 +55,51 @@ class MainWindow(QMainWindow):
 
     @property
     def web_url(self) -> str:
-        """内嵌窗口实际加载的 Web 应用地址（单一来源：Config.web_url）。"""
-        return Config.web_url
+        """内嵌窗口实际加载的 Web 应用地址（单一来源：Config.web_url）。
+
+        加载时把登录账号的 uid 动态注入查询参数，避免 URL 硬编码账号导致
+        多账号下指令路由到错误设备：
+          - 外层带 url= 参数（平台 mod 控制台包裹内层页面）→ 注入/覆盖内层 URL 的 uid；
+          - 否则直接注入/覆盖外层 URL 的 uid。
+        uid 未就绪（未登录）时原样返回，登录成功后 _inject_cookies 会用
+        带 uid 的地址重新加载页面。"""
+        uid = self._local_uid()
+        if not uid:
+            return Config.web_url
+        return self._inject_uid(Config.web_url, uid)
+
+    @staticmethod
+    def _local_uid() -> str:
+        """从登录令牌解析出的 Config.user 里取用户 id（与桥侧 _resolve_uid 同源）。"""
+        user = getattr(Config, "user", None)
+        if isinstance(user, dict) and user.get("uid") is not None:
+            return str(user["uid"])
+        return ""
+
+    @staticmethod
+    def _inject_uid(url: str, uid: str) -> str:
+        """把 uid 注入/覆盖到 URL 查询参数；若外层带 url= 参数则注入其内层 URL。"""
+        parts = urlsplit(url)
+        query = parse_qsl(parts.query, keep_blank_values=True)
+        inner = next((v for k, v in query if k == "url"), None)
+        if inner is None:
+            new_query = [(k, v) for k, v in query if k != "uid"]
+            new_query.append(("uid", uid))
+            return urlunsplit(
+                (parts.scheme, parts.netloc, parts.path, urlencode(new_query), parts.fragment)
+            )
+        inner_parts = urlsplit(inner)
+        inner_query = [(k, v) for k, v in parse_qsl(inner_parts.query, keep_blank_values=True) if k != "uid"]
+        inner_query.append(("uid", uid))
+        new_inner = urlunsplit(
+            (inner_parts.scheme, inner_parts.netloc, inner_parts.path,
+             urlencode(inner_query), inner_parts.fragment)
+        )
+        outer_query = [(k, v) for k, v in query if k != "url"]
+        outer_query.append(("url", new_inner))
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(outer_query), parts.fragment)
+        )
 
     def _init_auth(self):
         """从 keyring 加载令牌：有效则注入 cookie；access token 过期但 refresh token
@@ -99,6 +143,21 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             return
         self._apply_tokens(tokens)
+
+    def request_logout(self):
+        """前端经本地桥发起的退出登录：清空本机凭据并回到统一登录态。
+
+        _set_authenticated(False) 触发 auth_changed 信号，外部会把 client
+        连接与本地桥一并停掉；随后重载页面并弹出统一 IAM 浏览器登录。"""
+        from ..user.login import clear_tokens
+        clear_tokens()
+        Config.user = {}  # 清空登录身份：避免重载页面时注入旧 uid / whoami 返回旧账号
+        self._access_token = ""
+        self._refresh_token = ""
+        self._last_saved_token = ""
+        self._set_authenticated(False)
+        self._web_view.load(QUrl(self.web_url))
+        QTimer.singleShot(300, self._show_login_dialog)
 
     def _inject_cookies(self, tokens: Tokens):
         """从 keyring 读取令牌，注入 cookie 和 localStorage 到 Web 视图。"""

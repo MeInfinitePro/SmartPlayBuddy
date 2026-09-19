@@ -7,18 +7,24 @@ name = "smartplaybuddy"
 version = "0.1.0"
 description = "A Python client for SmartPlayBuddy gamepad control."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 dependencies = [
-    "websockets",
-    "pyautogui",
-    "keyring",
-]
-
-[project.optional-dependencies]
-ui = [
+    # 共享依赖：client / mod / web 桥接层都需要，保持轻量、跨平台
+    "websockets>=12.0",
     "qasync",
     "PyQt6",
     "PyQt6-WebEngine",
+    "keyring",
+    "pydantic-settings>=2.0",
+]
+
+[project.optional-dependencies]
+# 用户本地形态（Windows 游戏机）：pip install "smartplaybuddy[client]"
+client = [
+    "pyautogui",
+    "pywin32",
+    "psutil",
+    "windows-capture",
 ]
 
 [tool.setuptools.packages.find]
@@ -26,3 +32,8 @@ where = ["src"]
 
 [project.scripts]
 smtplay = "smartplaybuddy.client:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# basetemp 放在工作区内，避免沙箱对系统 Temp 目录的写入限制
+addopts = "--basetemp=tests/.pytest_tmp"
