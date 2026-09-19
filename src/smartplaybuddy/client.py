@@ -285,14 +285,26 @@ def main():
             }
             logger.info("客户端注册: type=client deviceName=%s", device_name)
             client = Client(**client_config)
+            local_uid = user.decode_jwt_payload(tokens.access_token).get("uid")
+            local_uid = str(local_uid) if local_uid is not None else None
 
-            # 保活观察：连接被动断开，或令牌临期且空闲时，重建连接续期
+            # 保活观察：连接被动断开，或令牌临期且空闲时，重建连接续期。
+            # 另每 15s 比对 keyring 中的账号：本机重新登录切换账号后，立即重建连接换身份。
             started = asyncio.get_event_loop().time()
             while True:
                 await asyncio.sleep(CHECK_INTERVAL)
                 if client._closed.is_set():
                     logger.warning("WS 连接已断开，%ds 后重连", CHECK_INTERVAL)
                     break
+                try:
+                    switched = user.login._load_tokens()
+                    new_uid = user.decode_jwt_payload(switched.access_token).get("uid") if switched else None
+                    new_uid = str(new_uid) if new_uid is not None else None
+                    if local_uid and new_uid and new_uid != local_uid:
+                        logger.info("检测到本机登录账号已切换（%s -> %s），重建连接切换身份", local_uid, new_uid)
+                        break
+                except Exception:
+                    pass
                 elapsed = asyncio.get_event_loop().time() - started
                 if elapsed >= RENEW_AT:
                     if client._busy or client._active_streams:

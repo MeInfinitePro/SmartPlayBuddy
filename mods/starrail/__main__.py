@@ -137,7 +137,9 @@ def main():
                 continue
             backoff = RETRY_BASE  # 连接成功，重置退避
 
-            # 保活观察：连接被动断开，或令牌临期且当前空闲时，退出内层循环触发重连
+            # 保活观察：连接被动断开，或令牌临期且当前空闲时，退出内层循环触发重连。
+            # 另每 15s 比对 keyring 中的账号：本机重新登录切换账号后，立即重建连接换身份，
+            # 不必等令牌续期周期（2026-09-19）。
             started = asyncio.get_running_loop().time()
             try:
                 while True:
@@ -145,6 +147,14 @@ def main():
                     if mod._closed.is_set():
                         logger.warning("WS 连接已断开，%ds 后重连", CHECK_INTERVAL)
                         break
+                    try:
+                        switched = user.login._load_tokens()
+                        new_uid = decode_user_id(switched.access_token) if switched else None
+                        if uid and new_uid and new_uid != uid:
+                            logger.info("检测到本机登录账号已切换（%s -> %s），重建连接切换身份", uid, new_uid)
+                            break
+                    except Exception as e:
+                        logger.debug("账号切换检查失败（忽略）：%s", e)
                     elapsed = asyncio.get_running_loop().time() - started
                     if elapsed >= RENEW_AT and not mod._tasks:
                         logger.info("access_token 即将过期（%ds），空闲中主动重建连接续期", TOKEN_TTL)
