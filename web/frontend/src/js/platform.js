@@ -186,17 +186,12 @@ function bridgeCall(action, { timeoutS = 10 } = {}) {
 }
 
 /** 查询登录身份：返回 {uid, name?, source?}；uid 为空说明未登录。
- *  client 内嵌 → 本机桥 whoami（4s 快速失败后试服务端会话兜底）；
+ *  client 内嵌 → 只走本机桥 whoami（client 用 keyring 凭据认证，服务端
+ *  会话服务在本机 origin 上不存在，不做兜底以免产生无效连接）；
  *  控制台挂载/同域独立 → 服务端 /ws session/status（文档身份服务）。 */
 export async function whoami(opts = {}) {
   if (qtEmbedded) {
-    try {
-      return await bridgeCall('whoami', { timeoutS: 4, ...opts });
-    } catch (e) {
-      const srv = await fetchServerIdentity().catch(() => null);
-      if (srv) return { uid: srv.userId, source: 'server' };
-      throw e;
-    }
+    return bridgeCall('whoami', { timeoutS: 4, ...opts });
   }
   const srv = await fetchServerIdentity(opts);
   return { uid: srv.userId, source: 'server' };
