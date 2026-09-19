@@ -22,18 +22,34 @@ const qs = new URLSearchParams(location.search);
 export const isPlatformMode =
   qs.get('platform') === '1' || (window.parent !== window && qs.get('platform') !== '0');
 
-/** userId：?uid= > localStorage；缺失时指令无法路由（页面日志会提示） */
-export const uid = qs.get('uid') || localStorage.getItem('spb_pf_uid') || '';
+/** userId：只认 ?uid=（显式传入）。
+ *  - 内嵌 client 模式：登录后由 whoami（本机桥身份查询）提供真实身份；
+ *  - 浏览器直开模式：必须在入口 URL 携带 &uid=，缺失时报错而非静默路由。
+ *  2026-09-19：移除 localStorage 兜底——实测换账号后旧缓存导致新账号指令
+ *  静默路由到旧账号设备（串号），宁可显式报错。 */
+export const uid = qs.get('uid') || '';
+let resolvedUid = uid;
+
+/** whoami 成功后由上层写入本机登录身份（优先级高于 URL uid） */
+export function setResolvedUid(u) {
+  if (u !== null && u !== undefined && u !== '') resolvedUid = String(u);
+}
+
+/** 当前生效的 userId（whoami 结果 > URL uid） */
+export function getUid() {
+  return resolvedUid;
+}
 
 /** mod 设备名：?mod= > localStorage > starrail */
 export const modName = qs.get('mod') || localStorage.getItem('spb_pf_mod') || 'starrail';
 
-if (qs.get('uid')) localStorage.setItem('spb_pf_uid', uid);
+// 清理历史版本可能写入的旧 uid 缓存，避免任何残留影响路由
+localStorage.removeItem('spb_pf_uid');
 if (qs.get('mod')) localStorage.setItem('spb_pf_mod', modName);
 
 export function modTarget() {
-  if (!uid) return null;
-  return `mod:${uid}:${modName}`;
+  if (!resolvedUid) return null;
+  return `mod:${resolvedUid}:${modName}`;
 }
 
 // ---------- SDK 桥（异步初始化；未加载完成的发送会排队等待） ----------
@@ -108,7 +124,7 @@ export function modRequest(operate, params = {}, { timeoutS = 60 } = {}) {
   const to = modTarget();
   if (!to) {
     return Promise.reject(
-      new Error('缺少 userId：请在控制台 ?url= 中附带 &uid=<你的userId>，或曾在本域保存过'),
+      new Error('缺少 userId：本机桥 whoami 未取到身份且 URL 未携带 &uid=，请先在 client 完成登录'),
     );
   }
   return bridgeReady.then((smtplay) => {
@@ -137,6 +153,35 @@ export function modRequest(operate, params = {}, { timeoutS = 60 } = {}) {
       smtplay.send(msg);
     });
   });
+}
+
+/**
+ * 本机 system 指令（To=local，桥就地处理、不透传服务端）。
+ * 响应经 handleMessage 按 requestId 匹配 resolve。
+ */
+function bridgeCall(action, { timeoutS = 10 } = {}) {
+  return bridgeReady.then((smtplay) => new Promise((resolve, reject) => {
+    const msg = new SdkMessage('system', action, null, { to: 'local' });
+    const requestId = msg.requestId;
+    const timer = setTimeout(() => {
+      if (pending.has(requestId)) {
+        pending.delete(requestId);
+        reject(new Error(`${action} ${timeoutS}s 无响应（本机桥未就绪或已断开）`));
+      }
+    }, timeoutS * 1000);
+    pending.set(requestId, { resolve, reject, timer });
+    smtplay.send(msg);
+  }));
+}
+
+/** 查询本机 client 登录身份：返回 {uid, name?, ...}；uid 为空说明 client 未登录 */
+export function whoami(opts) {
+  return bridgeCall('whoami', opts);
+}
+
+/** 请求本机 client 退出登录（清令牌、断开桥、回到统一 IAM 登录） */
+export function bridgeLogout(opts) {
+  return bridgeCall('logout', opts);
 }
 
 if (isPlatformMode) {

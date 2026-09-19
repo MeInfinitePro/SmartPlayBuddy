@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- 禁用缓存：防止浏览器命中旧版 HTML/JS 造成 DOM 结构不匹配（白屏/卡加载页） -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>三月七小助手 · SmartPlayBuddy</title>
+  <link rel="stylesheet" href="css/style.css?v=20260909" />
+  <link rel="icon" href="assets/favicon.png" type="image/x-icon"/>
+</head>
+<body>
+  <div id="app">
+    <!-- 加载中 -->
+    <div id="auth-loading" class="card center-card"><p>正在检查登录状态…</p></div>
+
+    <!-- 未登录兜底（仅当无法获取统一登录地址时才显示；正常会直接跳转统一登录） -->
+    <div id="auth-gate" class="card center-card" style="display:none;">
+      <div class="gate-logo">⚠️</div>
+      <h2>无法进入控制台</h2>
+      <div id="auth-error" class="error-msg" style="display:none;"></div>
+      <a id="login-link" href="#" style="display:none;">
+        <button type="button">重新前往统一登录</button>
+      </a>
+      <p id="login-fail" class="red-text" style="display:none;"></p>
+    </div>
+
+    <!-- ================= 已登录：应用壳（左侧导航 + 内容区） ================= -->
+    <div id="shell" style="display:none;">
+      <!-- 左侧导航 -->
+      <aside id="sidebar">
+        <div class="brand">
+          <div class="brand-logo">✦</div>
+          <div>
+            <div class="brand-name">三月七小助手</div>
+            <div class="brand-sub">SmartPlayBuddy</div>
+          </div>
+        </div>
+
+        <nav id="nav">
+          <button type="button" class="nav-item active" data-page="home"><span class="nav-ico">🏠</span>主页</button>
+          <button type="button" class="nav-item" data-page="help"><span class="nav-ico">❓</span>帮助</button>
+          <button type="button" class="nav-item" data-page="launch"><span class="nav-ico">▶️</span>启动游戏</button>
+          <button type="button" class="nav-item" data-page="log"><span class="nav-ico">📜</span>日志</button>
+          <button type="button" class="nav-item" data-page="settings"><span class="nav-ico">⚙️</span>设置</button>
+        </nav>
+
+        <div class="side-foot">
+          <div class="muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            开拓者：<span id="user-id">未知</span>
+          </div>
+          <button type="button" class="ghost btn-logout" id="btn-logout">退出登录</button>
+        </div>
+      </aside>
+
+      <!-- 内容区 -->
+      <main id="content">
+
+        <!-- 主页 -->
+        <section class="page active" id="page-home">
+          <div class="hero">
+            <div class="hero-text">
+              <div class="hero-eyebrow">✦ 崩坏：星穹铁道 · 全自动日常</div>
+              <h1>三月七小助手</h1>
+              <p class="hero-sub">SmartPlayBuddy —— 每日实训 / 清理开拓力，交给小三月就好啦~</p>
+            </div>
+            <div class="hero-deco" aria-hidden="true">✧✦✧</div>
+          </div>
+
+          <div class="module-grid">
+            <!-- 每日实训 -->
+            <div class="module-card" id="card-daily">
+              <div class="module-head">
+                <div class="module-avatar">📋</div>
+                <div>
+                  <h3>每日实训</h3>
+                  <span class="tag accent">自动执行</span>
+                </div>
+              </div>
+              <p class="desc">完整流程：观察任务列表 → 逐项执行 → 领取每日实训奖励，全程游戏内自动完成。</p>
+              <button type="button" id="btn-run-daily">▶ 执行完整日常</button>
+              <div id="daily-error" class="error-msg" style="display:none;"></div>
+              <div id="daily-progress" class="progress-log" style="display:none;"></div>
+            </div>
+
+            <!-- 清理开拓力 -->
+            <div class="module-card" id="card-power">
+              <div class="module-head">
+                <div class="module-avatar">⚡</div>
+                <div>
+                  <h3>清理开拓力</h3>
+                  <span class="tag accent">按计划执行</span>
+                </div>
+              </div>
+              <p class="desc">按「设置 → 体力计划」中的方案自动清理开拓力。计划变更后主页将实时同步。</p>
+              <div id="power-plan-hint" class="plan-hint muted small">当前计划：—</div>
+              <button type="button" id="btn-clear-power">▶ 开始清体力</button>
+              <div id="power-error" class="error-msg" style="display:none;"></div>
+              <div id="power-progress" class="progress-log" style="display:none;"></div>
+            </div>
+          </div>
+
+          <p class="hint-line muted small">💡 任务执行期间请勿操作目标设备；实时进度展示在卡片下方，完整记录见「日志」。</p>
+        </section>
+
+        <!-- 启动游戏 -->
+        <section class="page" id="page-launch">
+          <div class="card">
+            <h2>▶️ 启动游戏</h2>
+            <p class="desc">从本页面唤起《崩坏：星穹铁道》客户端并保持在线，供后续自动化任务使用。</p>
+            <div class="launch-box">
+              <div class="launch-game">🎮</div>
+              <button type="button" id="btn-launch-game">启动《崩坏：星穹铁道》</button>
+              <p class="muted small" style="margin:12px 0 0;">※ 远程启动需 SmartPlayBuddy 客户端侧支持；Web 端当前会记录尝试日志。</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 日志 -->
+        <section class="page" id="page-log">
+          <div class="card">
+            <div class="row" style="justify-content:space-between;margin-bottom:12px;">
+              <h2 style="margin:0;">📜 运行日志</h2>
+              <button type="button" class="ghost small-btn" id="btn-clear-log">清空</button>
+            </div>
+            <p class="desc" style="margin-bottom:12px;">本会话内的任务执行记录（含主页执行进度）。刷新页面后清空。</p>
+            <div class="log-console" id="log-console">
+              <div class="line muted">— 暂无日志，等待任务开始 —</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 设置 -->
+        <section class="page" id="page-settings">
+          <div class="card">
+            <h2>⚙️ 目标设备</h2>
+            <p class="desc">client 端 deviceName；留空时使用当前会话默认目标设备。</p>
+            <input type="text" id="target-client" placeholder="client 端 deviceName（留空用会话默认）" style="width:min(420px,100%);" />
+          </div>
+
+          <div class="card">
+            <h2>🕘 体力计划</h2>
+            <p class="desc">
+              自定义清体力方案：0 表示清完全部开拓力；1-30 表示清理对应次数（每次 10 点，即 10-300 点）。
+              超出现有体力时按现有体力清理；启用后备开拓力时会先补足至 300 点。主页的「开始清体力」将按此计划执行。
+            </p>
+
+            <div class="row" style="margin-bottom:14px;">
+              <button type="button" class="ghost" id="btn-query-power">查询当前开拓力</button>
+            </div>
+            <div id="power-query-error" class="error-msg" style="display:none;"></div>
+            <div id="power-info" class="row" style="display:none; margin:4px 0 14px;">
+              <span class="tag accent">当前开拓力：<b id="power-current">未知</b></span>
+              <span class="tag">后备开拓力：<span id="power-reserve">未知</span></span>
+            </div>
+
+            <h3 class="small muted-text" style="margin:10px 0 4px;">清理次数 / 体力</h3>
+            <div class="slider-wrap">
+              <div class="row" style="justify-content: space-between;">
+                <span class="muted small">0（全部清完）</span>
+                <span class="slider-val" id="power-num-text">全部清完</span>
+                <span class="muted small">300 点</span>
+              </div>
+              <input type="range" id="power-num" min="0" max="30" step="1" value="0" />
+              <p class="muted small" style="margin:2px 0 10px;">计划：<span id="power-plan-text">全部清完</span></p>
+            </div>
+
+            <h3 class="small muted-text" style="margin:10px 0 8px;">战利品类型</h3>
+            <div class="row" style="margin-bottom:14px;">
+              <label class="check"><input type="radio" name="selection" value="1" checked /> 1. 信用点（藏宝之芽）</label>
+              <label class="check"><input type="radio" name="selection" value="2" /> 2. 角色经验（回忆之芽）</label>
+              <label class="check"><input type="radio" name="selection" value="3" /> 3. 光锥经验（虚空之芽）</label>
+            </div>
+
+            <label class="check">
+              <input type="checkbox" id="use-reserve" checked />
+              使用后备开拓力（补足至 300 点）
+            </label>
+          </div>
+        </section>
+
+        <!-- 帮助 -->
+        <section class="page" id="page-help">
+          <div class="card">
+            <h2>❓ 帮助</h2>
+            <p class="desc">三月七小助手 · SmartPlayBuddy 使用说明（Web 控制台）。</p>
+            <div class="help-list">
+              <div class="help-item"><b>① 环境准备</b><p>目标设备保持《崩坏：星穹铁道》客户端在线；建议游戏窗口分辨率 1920×1080、关闭 HDR，避免图像识别异常。</p></div>
+              <div class="help-item"><b>② 每日实训</b><p>进入「主页」点击「执行完整日常」。流程：观察未完成任务 → 逐项执行 → 领取每日实训奖励，全部在游戏内自动完成。</p></div>
+              <div class="help-item"><b>③ 清理开拓力</b><p>先在「设置 → 体力计划」中选好清体次数、战利品类型与是否使用后备开拓力，再回主页点击「开始清体力」。</p></div>
+              <div class="help-item"><b>④ 日志</b><p>主页执行任务的实时进度会同步写入「日志」页，可随时查看最近的操作记录。</p></div>
+              <div class="help-item"><b>⑤ 登录与目标设备</b><p>通过统一登录验证后进入；多客户端场景下可在「设置」填写目标 deviceName，留空则使用会话默认。</p></div>
+              <div class="help-item"><b>⑥ 注意事项</b><p>任务执行期间请勿手动操作目标设备，以免干扰自动化流程。</p></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js?v=20260909"></script>
+</body>
+</html>

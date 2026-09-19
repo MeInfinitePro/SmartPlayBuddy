@@ -56,7 +56,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue';
 import { api } from './js/api.js';
-import { isPlatformMode, uid, modName } from './js/platform.js';
+import { isPlatformMode, uid, modName, whoami, setResolvedUid } from './js/platform.js';
 import { pushLog } from './js/log.js';
 import { settings } from './js/settings.js';
 import HomeView from './views/HomeView.vue';
@@ -130,10 +130,21 @@ async function boot() {
   if (isPlatformMode) {
     userId.value = uid || '平台用户';
     phase.value = 'shell';
-    pushLog('ok', `✅ 平台桥接模式已就绪（mod: ${modName}${uid ? '，用户 ' + uid : ''}）。`);
-    if (!uid) {
-      pushLog('err', '⚠️ 缺少 userId：请在控制台入口 URL 的 ?url= 后追加 &uid=<你的userId>，否则指令无法路由。');
-    }
+    pushLog('ok', `✅ 平台桥接模式已就绪（mod: ${modName}）。`);
+    // 登录后向本机 client 查询真实身份（whoami），用户栏与指令路由均以它为准，
+    // 入口 URL 无需携带 uid
+    whoami().then((info) => {
+      if (info && info.uid != null && info.uid !== '') {
+        setResolvedUid(info.uid);
+        userId.value = info.name || info.nickname || info.username || String(info.uid);
+        pushLog('ok', `✅ 已连接本机 client，当前用户：${userId.value}`);
+      } else {
+        pushLog('err', '⚠️ 本机 client 未登录或身份为空，指令无法路由；请先在 client 完成登录。');
+      }
+    }).catch((e) => {
+      const msg = e && e.message ? e.message : String(e);
+      pushLog('err', `⚠️ 获取本机用户身份失败：${msg}。${uid ? '暂时使用 URL 携带的 uid。' : '且 URL 未携带 uid，指令无法路由。'}`);
+    });
     return;
   }
 
