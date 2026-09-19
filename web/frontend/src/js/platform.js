@@ -15,12 +15,23 @@
 
 import { SmtplayWSBridge } from './smtplay-sdk-bridge.js';
 import { Message as SdkMessage } from './smtplay-sdk-message.js';
+import { fetchServerIdentity, serverLogout } from './serverSession.js';
 
 const qs = new URLSearchParams(location.search);
 
 /** 是否平台桥接模式：处于 iframe 内（平台控制台）或显式 ?platform=1 */
 export const isPlatformMode =
   qs.get('platform') === '1' || (window.parent !== window && qs.get('platform') !== '0');
+
+/**
+ * 运行环境判别：本前端有两种「桥接模式」宿主——
+ *  1. client 内嵌（PyQt6-WebEngine，UA 含 QtWebEngine）：本机桥可用，
+ *     whoami/logout 走 To=local（清 client keyring，回统一 IAM 登录）；
+ *  2. SmartBuddy_Web 控制台 iframe / 同域独立部署：本机桥不存在，
+ *     whoami 走服务端 /ws session/status，logout 走 /api/user/auth/logout
+ *     （服务端吊销会话，与 SmartBuddy_Web 同款）。
+ */
+export const qtEmbedded = /QtWebEngine/i.test(navigator.userAgent);
 
 /** userId：只认 ?uid=（显式传入）。
  *  - 内嵌 client 模式：登录后由 whoami（本机桥身份查询）提供真实身份；
@@ -174,14 +185,35 @@ function bridgeCall(action, { timeoutS = 10 } = {}) {
   }));
 }
 
-/** 查询本机 client 登录身份：返回 {uid, name?, ...}；uid 为空说明 client 未登录 */
-export function whoami(opts) {
-  return bridgeCall('whoami', opts);
+/** 查询登录身份：返回 {uid, name?, source?}；uid 为空说明未登录。
+ *  client 内嵌 → 本机桥 whoami（4s 快速失败后试服务端会话兜底）；
+ *  控制台挂载/同域独立 → 服务端 /ws session/status（文档身份服务）。 */
+export async function whoami(opts = {}) {
+  if (qtEmbedded) {
+    try {
+      return await bridgeCall('whoami', { timeoutS: 4, ...opts });
+    } catch (e) {
+      const srv = await fetchServerIdentity().catch(() => null);
+      if (srv) return { uid: srv.userId, source: 'server' };
+      throw e;
+    }
+  }
+  const srv = await fetchServerIdentity(opts);
+  return { uid: srv.userId, source: 'server' };
 }
 
-/** 请求本机 client 退出登录（清令牌、断开桥、回到统一 IAM 登录） */
-export function bridgeLogout(opts) {
-  return bridgeCall('logout', opts);
+/** 退出登录：按运行环境选择凭据体系。
+ *  client 内嵌 → 本机桥清 keyring 令牌，client 回统一 IAM 登录；
+ *  控制台挂载 → 服务端登出（撤 JTI + 吊销 refresh + 清 cookie），
+ *  挂载我们的控制台页会话随之失效并回登录页。 */
+export async function logout() {
+  if (qtEmbedded) {
+    try {
+      await bridgeCall('logout', { timeoutS: 10 });
+    } catch { /* 桥已断开等异常不阻塞前端收尾 */ }
+    return;
+  }
+  await serverLogout();
 }
 
 if (isPlatformMode) {

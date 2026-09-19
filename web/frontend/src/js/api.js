@@ -7,7 +7,7 @@
  */
 import {
   isPlatformMode, uid, modName, modRequest, modStartJob, modPollJob,
-  whoami, bridgeLogout,
+  whoami, logout as platformLogout,
 } from './platform.js';
 
 async function request(method, url, body) {
@@ -67,7 +67,8 @@ const restApi = {
 
 /** 平台桥接模式实现：返回形状与 restApi 一致，但直接指挥 mod 后端 */
 const platformApi = {
-  // 身份来自本机 client 的 whoami（登录令牌），URL uid 仅作兜底展示
+  // 身份来源按运行环境分流（platform.whoami）：client 内嵌=本机桥登录令牌；
+  // 控制台挂载=服务端 /ws session/status。URL uid 仅作兜底展示
   me: async () => {
     try {
       const info = await whoami();
@@ -78,13 +79,9 @@ const platformApi = {
       return { authenticated: true, userId: uid || '平台用户' };
     }
   },
-  // 退出 = 通知本机 client 清令牌并回到统一 IAM 登录（桥会随之断开）
+  // 退出按运行环境分流：client 内嵌=本机桥清 keyring；控制台挂载=服务端吊销会话
   logout: async () => {
-    try {
-      await bridgeLogout();
-    } catch {
-      /* 桥已断开等异常不阻塞前端收尾 */
-    }
+    await platformLogout();
   },
   gameRunning: async () => ({
     running: !!(await modRequest('game/running', {}, { timeoutS: 30 })).running,

@@ -131,19 +131,20 @@ async function boot() {
     userId.value = uid || '平台用户';
     phase.value = 'shell';
     pushLog('ok', `✅ 平台桥接模式已就绪（mod: ${modName}）。`);
-    // 登录后向本机 client 查询真实身份（whoami），用户栏与指令路由均以它为准，
-    // 入口 URL 无需携带 uid
+    // 登录后查询真实身份（whoami 按运行环境分流：本机桥 / 服务端会话），
+    // 用户栏与指令路由均以它为准，入口 URL 无需携带 uid
     whoami().then((info) => {
       if (info && info.uid != null && info.uid !== '') {
         setResolvedUid(info.uid);
         userId.value = info.name || info.nickname || info.username || String(info.uid);
-        pushLog('ok', `✅ 已连接本机 client，当前用户：${userId.value}`);
+        const via = info.source === 'server' ? '服务端会话' : '本机 client';
+        pushLog('ok', `✅ 已连接（${via}），当前用户：${userId.value}`);
       } else {
-        pushLog('err', '⚠️ 本机 client 未登录或身份为空，指令无法路由；请先在 client 完成登录。');
+        pushLog('err', '⚠️ 未登录或身份为空，指令无法路由；请先完成登录。');
       }
     }).catch((e) => {
       const msg = e && e.message ? e.message : String(e);
-      pushLog('err', `⚠️ 获取本机用户身份失败：${msg}。${uid ? '暂时使用 URL 携带的 uid。' : '且 URL 未携带 uid，指令无法路由。'}`);
+      pushLog('err', `⚠️ 获取用户身份失败：${msg}。${uid ? '暂时使用 URL 携带的 uid。' : '且 URL 未携带 uid，指令无法路由。'}`);
     });
     return;
   }
